@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>uHerbSync — Smart iHerb Supplement Manager</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0D1117;
+      --surface:   #161B22;
+      --border:    #30363D;
+      --accent:    #4D9EFF;
+      --accent2:   #3DDC84;
+      --text:      #E6EDF3;
+      --muted:     #8B949E;
+      --radius:    12px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      line-height: 1.7;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── HERO ── */
+    .hero {
+      text-align: center;
+      padding: 80px 24px 64px;
+      background: linear-gradient(160deg, #0D1117 0%, #161B22 100%);
+      border-bottom: 1px solid var(--border);
+    }
+    .hero-badge {
+      display: inline-block;
+      background: rgba(77,158,255,.12);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      padding: 4px 14px;
+      border-radius: 20px;
+      margin-bottom: 20px;
+    }
+    .hero h1 {
+      font-size: clamp(28px, 5vw, 48px);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: 16px;
+    }
+    .hero h1 span { color: var(--accent); }
+    .hero p {
+      font-size: clamp(15px, 2.5vw, 19px);
+      color: var(--muted);
+      max-width: 580px;
+      margin: 0 auto 32px;
+    }
+    .hero-cta {
+      display: inline-block;
+      background: var(--accent);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      padding: 13px 32px;
+      border-radius: 8px;
+      transition: opacity .15s;
+    }
+    .hero-cta:hover { opacity: .88; text-decoration: none; }
+
+    /* ── SECTIONS ── */
+    section { padding: 64px 24px; max-width: 860px; margin: 0 auto; }
+    section + section { border-top: 1px solid var(--border); }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+    h2 {
+      font-size: clamp(22px, 3.5vw, 30px);
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .section-lead {
+      color: var(--muted);
+      margin-bottom: 36px;
+      max-width: 620px;
+    }
+
+    /* ── FEATURES GRID ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+    .feature-icon {
+      font-size: 28px;
+      margin-bottom: 12px;
+      line-height: 1;
+    }
+    .feature-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .feature-card p { font-size: 14px; color: var(--muted); }
+
+    /* ── PRINCIPLES LIST ── */
+    .principles-list { list-style: none; display: flex; flex-direction: column; gap: 16px; }
+    .principles-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+    }
+    .principle-dot {
+      flex-shrink: 0;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent2);
+      margin-top: 7px;
+    }
+    .principles-list li p { font-size: 15px; color: var(--text); }
+
+    /* ── AUDIENCE TAGS ── */
+    .audience-tags { display: flex; flex-wrap: wrap; gap: 12px; }
+    .audience-tag {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 20px;
+      font-size: 15px;
+    }
+    .audience-tag span { color: var(--accent); margin-right: 8px; }
+
+    /* ── NOTICE BOXES ── */
+    .notice-box {
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      font-size: 14px;
+      line-height: 1.75;
+    }
+    .notice-box.disclaimer {
+      background: rgba(255,165,0,.06);
+      border: 1px solid rgba(255,165,0,.25);
+      color: #FFCA6E;
+    }
+    .notice-box.affiliate {
+      background: rgba(77,158,255,.06);
+      border: 1px solid rgba(77,158,255,.25);
+      color: var(--text);
+    }
+    .notice-box strong {
+      display: block;
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    /* ── ABOUT THIS PROJECT ── */
+    .about-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+    .about-box p + p { margin-top: 12px; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      text-align: center;
+      padding: 32px 24px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── HERO ── -->
+  <header class="hero">
+    <div class="hero-badge">iHerb Supplement Manager</div>
+    <h1><span>uHerbSync</span> — Smart Supplement Tracker</h1>
+    <p>Effortlessly manage your iHerb supplement inventory. Never run out — or overstock — again.</p>
+    <a class="hero-cta" href="https://play.google.com/store" target="_blank" rel="noopener">
+      Download on Google Play
+    </a>
+  </header>
+
+  <!-- ── FEATURES ── -->
+  <section id="features">
+    <div class="section-label">Features</div>
+    <h2>Everything you need to stay on top of your supplements</h2>
+    <p class="section-lead">Six core tools designed for serious iHerb shoppers who want clarity, not chaos.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Inventory Tracking</h3>
+        <p>Auto-calculates remaining days per supplement so you always know your exact stock level at a glance.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔗</div>
+        <h3>Smart Entry</h3>
+        <p>Paste an iHerb product URL and the app automatically parses the product name, dosage, and details.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧾</div>
+        <h3>Tax Exemption Reminder</h3>
+        <p>Track your semi-annual duty-free quota so you can plan purchases and avoid unexpected import fees.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🤖</div>
+        <h3>AI Analysis</h3>
+        <p>Generate a one-tap supplement summary to copy into your AI assistant for a personalized stack review.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📋</div>
+        <h3>Order History</h3>
+        <p>All purchase records stored privately on your device — no account needed, accessible anytime.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔔</div>
+        <h3>Restock Alerts</h3>
+        <p>Get notified before you run low so you never miss re-ordering a supplement you rely on daily.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PRINCIPLES ── -->
+  <section id="principles">
+    <div class="section-label">Our Principles</div>
+    <h2>Built on transparency and privacy</h2>
+    <p class="section-lead">We believe a tool that manages your health information should earn your trust, not assume it.</p>
+    <ul class="principles-list">
+      <li>
+        <div class="principle-dot"></div>
+        <p><strong>Free forever, zero ads</strong> — uHerbSync is free to download with no advertisements and no in-app purchases.</p>
+      </li>
+      <li>
+        <div class="principle-dot"></div>
+        <p><strong>Your data stays on your device</strong> — All information is stored locally. We never upload your supplement data to any server or cloud service.</p>
+      </li>
+      <li>
+        <div class="principle-dot"></div>
+        <p><strong>No account required</strong> — You do not need to create a profile, sign in, or share any personal information to use this app.</p>
+      </li>
+      <li>
+        <div class="principle-dot"></div>
+        <p><strong>Honest affiliate disclosure</strong> — When affiliate links are present, they are clearly disclosed. Commissions never influence which products we surface or recommend.</p>
+      </li>
+    </ul>
+  </section>
+
+  <!-- ── WHO IT'S FOR ── -->
+  <section id="audience">
+    <div class="section-label">Who It's For</div>
+    <h2>Made for serious supplement users</h2>
+    <p class="section-lead">uHerbSync is most valuable if any of the following sound like you.</p>
+    <div class="audience-tags">
+      <div class="audience-tag"><span>✓</span>Regular iHerb shoppers who place orders every 1–3 months</div>
+      <div class="audience-tag"><span>✓</span>Health enthusiasts managing five or more supplements at once</div>
+      <div class="audience-tag"><span>✓</span>Budget-conscious buyers who track their semi-annual duty-free spending limit</div>
+      <div class="audience-tag"><span>✓</span>Anyone who has ever run out of a supplement mid-course</div>
+      <div class="audience-tag"><span>✓</span>People who want a private, offline alternative to cloud-based health trackers</div>
+    </div>
+  </section>
+
+  <!-- ── DISCLAIMER ── -->
+  <section id="disclaimer">
+    <div class="section-label">Health Disclaimer</div>
+    <h2>For informational purposes only</h2>
+    <div class="notice-box disclaimer">
+      <strong>Important Notice</strong>
+      uHerbSync is an inventory and organizational tool only. It does not provide medical advice, diagnosis, or treatment recommendations. The information displayed within the app — including dosage data parsed from product listings — is for personal tracking purposes only and does not constitute a health claim. Always consult a qualified healthcare professional before using any supplement.
+    </div>
+  </section>
+
+  <!-- ── AFFILIATE DISCLOSURE ── -->
+  <section id="affiliate">
+    <div class="section-label">Affiliate Disclosure</div>
+    <h2>How we stay free</h2>
+    <div class="notice-box affiliate">
+      <strong>Affiliate Link Disclosure</strong>
+      Some links within this app are affiliate links. When users purchase through these links, we may earn a commission — this does not affect the product price or our recommendation standards. We only reference products available on iHerb and do not endorse any specific supplement for any medical purpose.
+    </div>
+  </section>
+
+  <!-- ── ABOUT THIS PROJECT ── -->
+  <section id="about">
+    <div class="section-label">About This Project</div>
+    <h2>Why uHerbSync exists</h2>
+    <div class="about-box">
+      <p>uHerbSync was created by a long-time iHerb user who was frustrated by spreadsheets, forgotten reorder dates, and unexpectedly hitting the duty-free limit mid-cart-checkout. The goal was simple: one clean app that handles the logistics so you can focus on the health side.</p>
+      <p>This is a solo indie project. Feedback, bug reports, and feature requests are genuinely welcome. If this tool saves you even one missed reorder, it has done its job.</p>
+    </div>
+  </section>
+
+  <!-- ── FOOTER ── -->
+  <footer>
+    <p>Last updated: 2026 &nbsp;·&nbsp; uHerbSync</p>
+    <p style="margin-top:6px;">
+      <a href="#disclaimer">Health Disclaimer</a> &nbsp;·&nbsp;
+      <a href="#affiliate">Affiliate Disclosure</a>
+    </p>
+  </footer>
+
+</body>
+</html>
