@@ -187,6 +187,34 @@
     }
     .about-box p + p { margin-top: 12px; }
 
+    /* ── CONTACT ── */
+    .contact-card {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      font-size: 15px;
+    }
+    .contact-icon { font-size: 28px; line-height: 1; flex-shrink: 0; }
+    .contact-card a { font-weight: 600; }
+
+    /* ── PRIVACY POLICY ── */
+    .privacy-box {
+      display: flex;
+      gap: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px 28px;
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+    .privacy-icon { font-size: 28px; line-height: 1.4; flex-shrink: 0; }
+
     /* ── FOOTER ── */
     footer {
       border-top: 1px solid var(--border);
@@ -312,17 +340,41 @@
     <div class="section-label">About This Project</div>
     <h2>Why uHerbSync exists</h2>
     <div class="about-box">
-      <p>uHerbSync was created by a long-time iHerb user who was frustrated by spreadsheets, forgotten reorder dates, and unexpectedly hitting the duty-free limit mid-cart-checkout. The goal was simple: one clean app that handles the logistics so you can focus on the health side.</p>
+      <p>uHerbSync was created by a long-time iHerb user who was frustrated by spreadsheets, forgotten reorder dates, and unexpectedly hitting the duty-free limit mid-cart-checkout. The goal was simple: one clean app that handles the logistics so you can focus on the health side — and turn your supplement routine into a structured, manageable system.</p>
       <p>This is a solo indie project. Feedback, bug reports, and feature requests are genuinely welcome. If this tool saves you even one missed reorder, it has done its job.</p>
+    </div>
+  </section>
+
+  <!-- ── CONTACT ── -->
+  <section id="contact">
+    <div class="section-label">Contact</div>
+    <h2>Get in touch</h2>
+    <div class="contact-card">
+      <div class="contact-icon">✉️</div>
+      <div>Have a question, found a bug, or just want to say hi?<br>
+        <a href="mailto:your@email.com">your@email.com</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PRIVACY POLICY ── -->
+  <section id="privacy">
+    <div class="section-label">Privacy Policy</div>
+    <h2>Your privacy matters</h2>
+    <div class="privacy-box">
+      <div class="privacy-icon">🔒</div>
+      <p>This website does not collect unnecessary personal data. If future versions of the app involve data storage, a full privacy policy will be provided.</p>
     </div>
   </section>
 
   <!-- ── FOOTER ── -->
   <footer>
-    <p>Last updated: 2026 &nbsp;·&nbsp; uHerbSync</p>
+    <p>Last updated: 2026 &nbsp;·&nbsp; uHerbSync &nbsp;·&nbsp; All rights reserved.</p>
     <p style="margin-top:6px;">
       <a href="#disclaimer">Health Disclaimer</a> &nbsp;·&nbsp;
-      <a href="#affiliate">Affiliate Disclosure</a>
+      <a href="#affiliate">Affiliate Disclosure</a> &nbsp;·&nbsp;
+      <a href="#privacy">Privacy Policy</a> &nbsp;·&nbsp;
+      <a href="#contact">Contact</a>
     </p>
   </footer>
 
