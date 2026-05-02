@@ -39,7 +39,14 @@
       "PowerShell(Get-ChildItem C:\\\\uherbsync | Where-Object { $_.Name -ne 'node_modules' } | Select-Object Name, Attributes)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(git rm *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(git pull *)",
+      "Bash(dir \"C:\\\\Users\\\\CCKU\\\\OneDrive\\\\文件\\\\uHerbSync\\\\screen*.jpg\")",
+      "Bash(dir \"C:\\\\Users\\\\CCKU\\\\OneDrive\\\\文件\\\\uHerbSync\\\\screen*.JPG\")",
+      "Read(//c/Users/CCKU/OneDrive/文件/uHerbSync/**)"
     ]
   }
 }

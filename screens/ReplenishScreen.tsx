@@ -38,6 +38,7 @@ type ParsedInfo = {
   spec: string;
   bottleSize: number;
   productId: string;
+  platform: 'iherb' | 'amazon' | 'vitacost' | 'swanson';
 };
 
 function parseIHerbUrl(url: string): ParsedInfo | null {
@@ -78,7 +79,93 @@ function parseIHerbUrl(url: string): ParsedInfo | null {
   }
 
   const productName = brand ? `${brand} - ${spec}` : spec;
-  return { productName, brand, spec, bottleSize, productId };
+  return { productName, brand, spec, bottleSize, productId, platform: 'iherb' };
+}
+
+function parseVitacostUrl(url: string): ParsedInfo | null {
+  const match = url.trim().match(/vitacost\.com\/p\/([a-z0-9-]+)/i);
+  if (!match) return null;
+
+  const slug = match[1];
+  const words = slug.split('-').filter(Boolean);
+  const capitalize = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+
+  const firstNumIdx = words.findIndex(w => /^\d+$/.test(w));
+  let brand: string;
+  let spec: string;
+  if (firstNumIdx <= 0) {
+    brand = '';
+    spec = words.map(capitalize).join(' ');
+  } else {
+    brand = words.slice(0, firstNumIdx).map(capitalize).join(' ');
+    spec  = words.slice(firstNumIdx).map(capitalize).join(' ');
+  }
+
+  const numericWords = words.filter(w => /^\d+$/.test(w));
+  const bottleSize = numericWords.length > 0 ? parseInt(numericWords[numericWords.length - 1], 10) : 30;
+
+  const productName = brand ? `${brand} - ${spec}` : spec;
+  return { productName, brand, spec, bottleSize, productId: '', platform: 'vitacost' };
+}
+
+function parseSwansonUrl(url: string): ParsedInfo | null {
+  const match = url.trim().match(/swansonvitamins\.com\/p\/([a-z0-9-]+)/i);
+  if (!match) return null;
+
+  const slug = match[1];
+  const words = slug.split('-').filter(Boolean);
+  const capitalize = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+
+  const firstNumIdx = words.findIndex(w => /^\d+$/.test(w));
+  let brand: string;
+  let spec: string;
+  if (firstNumIdx <= 0) {
+    brand = '';
+    spec = words.map(capitalize).join(' ');
+  } else {
+    brand = words.slice(0, firstNumIdx).map(capitalize).join(' ');
+    spec  = words.slice(firstNumIdx).map(capitalize).join(' ');
+  }
+
+  const UNIT_KEYWORDS = new Set(['caps', 'capsules', 'tablets', 'tablet']);
+  const unitIdx = words.findIndex(w => UNIT_KEYWORDS.has(w.toLowerCase()));
+  let bottleSize: number;
+  if (unitIdx > 0 && /^\d+$/.test(words[unitIdx - 1])) {
+    bottleSize = parseInt(words[unitIdx - 1], 10);
+  } else {
+    const numericWords = words.filter(w => /^\d+$/.test(w));
+    bottleSize = numericWords.length > 0 ? parseInt(numericWords[numericWords.length - 1], 10) : 30;
+  }
+
+  const productName = brand ? `${brand} - ${spec}` : spec;
+  return { productName, brand, spec, bottleSize, productId: '', platform: 'swanson' };
+}
+
+function parseAmazonUrl(url: string): ParsedInfo | null {
+  // Extract ASIN from /dp/[ASIN] or /gp/product/[ASIN]
+  const asinMatch = url.trim().match(/(?:\/dp\/|\/gp\/product\/)([A-Z0-9]{10})/i);
+  if (!asinMatch) return null;
+
+  const productId = asinMatch[1].toUpperCase();
+
+  // Try to extract title from the URL slug that appears before /dp/
+  const slugMatch = url.trim().match(/amazon\.[^/]+\/([^/?]+)\/(?:dp|gp\/product)\/[A-Z0-9]{10}/i);
+  let brand = '';
+  let spec = '';
+  if (slugMatch && slugMatch[1] !== 'dp') {
+    const capitalize = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
+    const words = decodeURIComponent(slugMatch[1]).replace(/[-_+]/g, ' ').split(/\s+/).filter(Boolean);
+    const firstNumIdx = words.findIndex(w => /^\d+$/.test(w));
+    if (firstNumIdx <= 0) {
+      spec = words.map(capitalize).join(' ');
+    } else {
+      brand = words.slice(0, firstNumIdx).map(capitalize).join(' ');
+      spec  = words.slice(firstNumIdx).map(capitalize).join(' ');
+    }
+  }
+
+  const productName = brand ? `${brand} - ${spec}` : (spec || `Amazon ${productId}`);
+  return { productName, brand, spec, bottleSize: 0, productId, platform: 'amazon' };
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -207,7 +294,9 @@ export default function ReplenishScreen() {
   }
 
   function handleLinkChange(rowId: string, text: string) {
-    const parsed = text.trim() ? parseIHerbUrl(text) : null;
+    const parsed = text.trim()
+      ? (parseIHerbUrl(text) ?? parseAmazonUrl(text) ?? parseVitacostUrl(text) ?? parseSwansonUrl(text))
+      : null;
     setRows(prev => prev.map(r => {
       if (r.id !== rowId) return r;
       const qty = parseInt(r.qty, 10) || 1;
@@ -461,6 +550,7 @@ export default function ReplenishScreen() {
 
               {/* b. iHerb link */}
               <Text style={[s.fieldLabel, { marginTop: 12 }]}>iHerb 商品連結</Text>
+              <Text style={s.platformHint}>✦ 支援自動解析：iHerb・Amazon・Vitacost・Swanson</Text>
               <View style={s.inputRow}>
                 <TextInput
                   style={[s.input, { flex: 1, paddingRight: 36 }, row.parsed && s.inputOk]}
@@ -480,7 +570,7 @@ export default function ReplenishScreen() {
               </View>
 
               {row.link.trim() !== '' && !row.parsed && (
-                <Text style={s.linkError}>請貼入完整 iHerb 商品頁網址</Text>
+                <Text style={s.linkError}>請貼入 iHerb、Amazon、Vitacost 或 Swanson 的商品頁網址</Text>
               )}
 
               {/* c. Sub-category — always visible */}
@@ -523,7 +613,8 @@ export default function ReplenishScreen() {
                     </View>
                   </View>
                   <Text style={s.subMeta}>
-                    每瓶 {row.parsed.bottleSize} 顆 · ID {row.parsed.productId}
+                    每瓶 {row.parsed.bottleSize} 顆
+                    {row.parsed.productId ? ` · ID ${row.parsed.productId}` : ''}
                     {row.pillsManuallyEdited ? '  · 已手動修改顆數' : ''}
                   </Text>
                 </>
@@ -717,6 +808,7 @@ const s = StyleSheet.create({
   pillsUnit: { fontSize: 11, color: C.textSecondary, marginTop: 3 },
   subMeta:   { fontSize: 10, color: C.textSecondary, marginTop: 5, marginLeft: 2 },
 
+  platformHint: { fontSize: 12, color: '#8B949E', marginBottom: 6 },
   linkError: { fontSize: 12, color: C.red, marginTop: 6, marginLeft: 2 },
 
   qtyAmountRow: { flexDirection: 'row' },

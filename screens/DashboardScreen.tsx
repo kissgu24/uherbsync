@@ -20,7 +20,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useCategories, SubItem } from '../contexts/CategoriesContext';
 import { CategoryItem, loadCategoryItems, saveCategoryItems, loadOrders, updateSubItemRemaining, updateSubItemActive, updateCategoryDose, updateCategoryTiming, getSetting, setSetting, runDailyDeductionIfNeeded } from '../db/db';
 import { COUNTRY_RULES, CountryCode } from '../constants/countryRules';
-import { buildIHerbSearchUrl, buildIHerbProductUrl } from '../constants/affiliate';
+import { buildIHerbSearchUrl, buildIHerbProductUrl, buildRestockUrl, buildPlatformSearchUrl, detectPlatform, RestockPlatform } from '../constants/affiliate';
 import { supabase } from '../lib/supabase';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
@@ -459,6 +459,7 @@ type CategoryModalProps = {
   timing: string;
   editingName: boolean;
   nameInput: string;
+  restockUrl: string;
   onChangeQty: (n: number) => void;
   onSaveQty: () => void;
   onReset: () => void;
@@ -473,7 +474,7 @@ type CategoryModalProps = {
 
 function CategoryModal({
   item, qty, originalQty, dose, doseUnit, timing,
-  editingName, nameInput,
+  editingName, nameInput, restockUrl,
   onChangeQty, onSaveQty, onReset, onEditDose, onEditTiming,
   onStartRename, onConfirmRename, onNameInputChange,
   onDelete, onClose,
@@ -579,11 +580,11 @@ function CategoryModal({
 
           <TouchableOpacity
             style={m.primaryBtn}
-            onPress={() => Linking.openURL(item.iherbUrl)}
+            onPress={() => Linking.openURL(restockUrl)}
             activeOpacity={0.8}
           >
             <Ionicons name="cart-outline" size={16} color="#fff" />
-            <Text style={m.primaryBtnText}>前往 iHerb 補貨</Text>
+            <Text style={m.primaryBtnText}>前往補貨</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={m.deleteBtn} onPress={onDelete} activeOpacity={0.8}>
@@ -728,6 +729,7 @@ export default function DashboardScreen() {
 
   const [country, setCountry] = useState<CountryCode>('TW');
   const [sortPreference, setSortPreference] = useState<'days' | 'custom'>('days');
+  const [defaultRestockPlatform, setDefaultRestockPlatform] = useState<RestockPlatform>('iherb');
   const [taxData, setTaxData] = useState({
     usedCount: 0, remainCount: 0, spentAmount: 0, remainAmount: 0, pct: 0,
   });
@@ -770,9 +772,10 @@ export default function DashboardScreen() {
     React.useCallback(() => {
       async function loadTaxData() {
         try {
-          const [savedCountry, savedSort] = await Promise.all([
+          const [savedCountry, savedSort, savedPlatform] = await Promise.all([
             getSetting('country'),
             getSetting('sort_preference'),
+            getSetting('default_restock_platform'),
           ]);
           const c: CountryCode =
             savedCountry === 'TW' || savedCountry === 'JP' || savedCountry === 'KR' || savedCountry === 'OFF'
@@ -780,6 +783,9 @@ export default function DashboardScreen() {
               : 'TW';
           setCountry(c);
           if (savedSort === 'days' || savedSort === 'custom') setSortPreference(savedSort);
+          if (savedPlatform === 'iherb' || savedPlatform === 'amazon' || savedPlatform === 'vitacost' || savedPlatform === 'swanson') {
+            setDefaultRestockPlatform(savedPlatform);
+          }
 
           const rule = COUNTRY_RULES[c];
           const orders = await loadOrders();
@@ -955,17 +961,17 @@ export default function DashboardScreen() {
   }
 
   function handleSubItemPress(sub: SubItem, parentCat: CategoryItem) {
+    const keyword = `${sub.brand} ${sub.spec}`;
+    const platform = detectPlatform(sub.iherbUrl);
+    const url = platform
+      ? buildRestockUrl(sub.iherbUrl, keyword)
+      : buildPlatformSearchUrl(keyword, defaultRestockPlatform);
     Alert.alert(
       '補充保健品',
       `${sub.brand}\n${sub.spec}`,
       [
         { text: '取消', style: 'cancel' },
-        {
-          text: '前往 iHerb 搜尋',
-          onPress: () => {
-            Linking.openURL(buildIHerbSearchUrl(`${sub.brand} ${sub.spec}`));
-          },
-        },
+        { text: '前往補貨', onPress: () => Linking.openURL(url) },
       ],
     );
   }
@@ -1342,6 +1348,7 @@ export default function DashboardScreen() {
           timing={currentTiming}
           editingName={editingName}
           nameInput={nameInput}
+          restockUrl={buildPlatformSearchUrl(selectedCat.nameEn || selectedCat.name, defaultRestockPlatform)}
           onChangeQty={setCurrentQty}
           onSaveQty={saveQty}
           onReset={() => setCurrentQty(selectedCat.subItems[0]?.bottleSize ?? 60)}

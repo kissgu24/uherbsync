@@ -6,6 +6,14 @@ import Constants from 'expo-constants';
 import { getSetting, setSetting } from '../db/db';
 
 import { COUNTRY_OPTIONS, CountryCode } from '../constants/countryRules';
+import { RestockPlatform } from '../constants/affiliate';
+
+const PLATFORM_OPTIONS: { key: RestockPlatform; emoji: string; label: string }[] = [
+  { key: 'iherb',    emoji: '🛒', label: 'iHerb' },
+  { key: 'amazon',   emoji: '📦', label: 'Amazon' },
+  { key: 'vitacost', emoji: '🌿', label: 'Vitacost' },
+  { key: 'swanson',  emoji: '🌻', label: 'Swanson' },
+];
 
 const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -24,6 +32,7 @@ export default function SettingsScreen() {
   const [country, setCountry] = useState<CountryCode>('TW');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [sortPreference, setSortPreference] = useState<'days' | 'custom'>('days');
+  const [defaultRestockPlatform, setDefaultRestockPlatform] = useState<RestockPlatform>('iherb');
 
   useFocusEffect(
     useCallback(() => {
@@ -37,6 +46,11 @@ export default function SettingsScreen() {
       }).catch(() => {});
       getSetting('sort_preference').then(val => {
         if (val === 'days' || val === 'custom') setSortPreference(val);
+      }).catch(() => {});
+      getSetting('default_restock_platform').then(val => {
+        if (val === 'iherb' || val === 'amazon' || val === 'vitacost' || val === 'swanson') {
+          setDefaultRestockPlatform(val);
+        }
       }).catch(() => {});
     }, [])
   );
@@ -62,6 +76,11 @@ export default function SettingsScreen() {
   async function selectSortPreference(pref: 'days') {
     setSortPreference(pref);
     await setSetting('sort_preference', pref);
+  }
+
+  async function selectRestockPlatform(platform: RestockPlatform) {
+    setDefaultRestockPlatform(platform);
+    await setSetting('default_restock_platform', platform);
   }
 
   return (
@@ -135,6 +154,28 @@ export default function SettingsScreen() {
               </View>
               <Text style={s.sortHint}>依用戶拖曳順序排列</Text>
             </View>
+          </View>
+        </View>
+
+        <View style={[s.section, s.sectionTop]}>
+          <Text style={s.sectionLabel}>預設補貨平台</Text>
+          <View style={s.btnGrid}>
+            {PLATFORM_OPTIONS.map(opt => {
+              const isActive = defaultRestockPlatform === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  style={[s.countryBtn, isActive && s.countryBtnActive]}
+                  onPress={() => selectRestockPlatform(opt.key)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={s.flag}>{opt.emoji}</Text>
+                  <Text style={[s.countryLabel, isActive && s.countryLabelActive]}>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 

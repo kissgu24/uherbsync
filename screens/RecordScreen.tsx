@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { loadOrders, deleteOrder, OrderRecord } from '../db/db';
-import { buildIHerbSearchUrl } from '../constants/affiliate';
+import { buildRestockUrl } from '../constants/affiliate';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ function ItemRow({ item, isLast }: ItemRowProps) {
       <Text style={d.colCat} numberOfLines={1}>{item.categoryName || '—'}</Text>
       <TouchableOpacity
         style={d.colBrand}
-        onPress={() => Linking.openURL(buildIHerbSearchUrl(`${brand} ${spec}`.trim()))}
+        onPress={() => Linking.openURL(buildRestockUrl('', `${brand} ${spec}`.trim()))}
         activeOpacity={0.7}
       >
         <Text style={d.brandTxt} numberOfLines={1}>{brand}</Text>

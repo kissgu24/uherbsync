@@ -99,6 +99,11 @@ export async function initDB(): Promise<void> {
   } catch {
     // Column already exists — safe to ignore
   }
+
+  // Seed default settings (no-op if key already exists)
+  await db.runAsync(
+    `INSERT OR IGNORE INTO settings (key, value) VALUES ('default_restock_platform', 'iherb')`
+  );
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
