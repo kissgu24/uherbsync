@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import * as Clipboard from 'expo-clipboard';
 import {
   View,
@@ -18,10 +19,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCategories, SubItem } from '../contexts/CategoriesContext';
-import { CategoryItem, loadCategoryItems, saveCategoryItems, loadOrders, updateSubItemRemaining, updateSubItemActive, updateCategoryDose, updateCategoryTiming, getSetting, setSetting, runDailyDeductionIfNeeded } from '../db/db';
+import { CategoryItem, loadCategoryItems, saveCategoryItems, loadOrders, updateSubItemRemaining, updateSubItemActive, updateSubItemBrandSpec, updateCategoryDose, updateCategoryTiming, getSetting, setSetting, runDailyDeductionIfNeeded, upsertProductSource, logEvent, getProductUrl } from '../db/db';
 import { COUNTRY_RULES, CountryCode } from '../constants/countryRules';
-import { buildIHerbSearchUrl, buildIHerbProductUrl, buildRestockUrl, buildPlatformSearchUrl, detectPlatform, RestockPlatform } from '../constants/affiliate';
+import { AMAZON_TAG, buildIHerbSearchUrl, buildIHerbProductUrl, buildRestockUrl, buildPlatformSearchUrl, detectPlatform, RestockPlatform } from '../constants/affiliate';
+import { formatCurrency } from '../utils/currency';
 import { supabase } from '../lib/supabase';
+import { i18n } from '../i18n';
+import { useLanguage } from '../contexts/LanguageContext';
+
+const isExpoGo = Constants.appOwnership === 'expo';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
@@ -41,8 +47,6 @@ const C = {
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
-
-const ACCOUNTS = ['本人', '多帳號管理'];
 
 function halfYearRange(): [Date, Date] {
   const now = new Date();
@@ -107,6 +111,33 @@ const DOSE_UNITS = ['顆', '匙', 'ml'] as const;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function normalizeKey(brand: string, spec: string): string {
+  const normalize = (s: string) => s.toLowerCase().replace(/[-_\s]+/g, '').trim();
+  return `${normalize(brand)}|${normalize(spec)}`;
+}
+
+function translateDoseUnit(unit: string): string {
+  const map: Record<string, string> = {
+    '顆': i18n.t('dashboard.doseUnitCap'),
+    '匙': i18n.t('dashboard.doseUnitScoop'),
+  };
+  return map[unit] ?? unit;
+}
+
+function translateTiming(timing: string): string {
+  const map: Record<string, string> = {
+    '空腹': i18n.t('dashboard.timingFasted'),
+    '早餐前': i18n.t('dashboard.timingBeforeBreakfast'),
+    '早餐後': i18n.t('dashboard.timingAfterBreakfast'),
+    '午餐前': i18n.t('dashboard.timingBeforeLunch'),
+    '午餐後': i18n.t('dashboard.timingAfterLunch'),
+    '晚餐前': i18n.t('dashboard.timingBeforeDinner'),
+    '晚餐後': i18n.t('dashboard.timingAfterDinner'),
+    '睡前': i18n.t('dashboard.timingBeforeBed'),
+  };
+  return map[timing] ?? timing;
+}
+
 function subItemDays(sub: SubItem, dailyDose: number): number {
   return dailyDose > 0 ? Math.floor(sub.remaining / dailyDose) : 0;
 }
@@ -126,10 +157,6 @@ function categoryDotColor(cat: CategoryItem): string {
 
 function subDotColor(sub: SubItem, dailyDose: number): string {
   return subItemDays(sub, dailyDose) >= 14 ? C.green : C.red;
-}
-
-function formatCurrency(n: number, currency: string) {
-  return `${currency}${n.toLocaleString()}`;
 }
 
 function calcFinishDate(qty: number, dose: number): string {
@@ -190,10 +217,10 @@ function DoseEditModal({ initialValue, initialUnit, onConfirm, onClose }: DoseEd
         <Pressable style={de.card} onPress={() => {}}>
           <View style={de.header}>
             <Ionicons name="repeat-outline" size={18} color={C.accent} />
-            <Text style={de.title}>調整每日用量</Text>
+            <Text style={de.title}>{i18n.t('dashboard.editDose')}</Text>
           </View>
           <View style={m.divider} />
-          <Text style={de.hint}>數量</Text>
+          <Text style={de.hint}>{i18n.t('dashboard.doseQty')}</Text>
           <TextInput
             style={de.input}
             value={inputText}
@@ -203,7 +230,7 @@ function DoseEditModal({ initialValue, initialUnit, onConfirm, onClose }: DoseEd
             selectTextOnFocus
             placeholderTextColor={C.textSecondary}
           />
-          <Text style={[de.hint, { marginTop: 14 }]}>單位</Text>
+          <Text style={[de.hint, { marginTop: 14 }]}>{i18n.t('dashboard.doseUnit')}</Text>
           <View style={de.unitRow}>
             {DOSE_UNITS.map(u => (
               <TouchableOpacity
@@ -212,17 +239,17 @@ function DoseEditModal({ initialValue, initialUnit, onConfirm, onClose }: DoseEd
                 onPress={() => setUnit(u)}
                 activeOpacity={0.75}
               >
-                <Text style={[de.unitText, unit === u && de.unitTextActive]}>{u}</Text>
+                <Text style={[de.unitText, unit === u && de.unitTextActive]}>{translateDoseUnit(u)}</Text>
               </TouchableOpacity>
             ))}
           </View>
           <View style={m.divider} />
           <View style={de.btnRow}>
             <TouchableOpacity style={[m.secondaryBtn, { flex: 1 }]} onPress={onClose}>
-              <Text style={m.secondaryBtnText}>取消</Text>
+              <Text style={m.secondaryBtnText}>{i18n.t('common.cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[m.primaryBtn, { flex: 1 }]} onPress={handleConfirm}>
-              <Text style={m.primaryBtnText}>確認</Text>
+              <Text style={m.primaryBtnText}>{i18n.t('common.confirm')}</Text>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -247,8 +274,8 @@ function TimingPickerModal({ current, onSelect, onClose }: TimingPickerProps) {
           <View style={tp.header}>
             <Ionicons name="time-outline" size={18} color={C.accent} />
             <View style={{ flex: 1 }}>
-              <Text style={m.modalTitle}>選擇服用時機</Text>
-              <Text style={tp.hint}>點擊選項即可更改</Text>
+              <Text style={m.modalTitle}>{i18n.t('dashboard.selectTiming')}</Text>
+              <Text style={tp.hint}>{i18n.t('dashboard.timingHint')}</Text>
             </View>
             <TouchableOpacity style={m.closeBtn} onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={18} color={C.textSecondary} />
@@ -265,7 +292,7 @@ function TimingPickerModal({ current, onSelect, onClose }: TimingPickerProps) {
                 onPress={() => { onSelect(opt); onClose(); }}
                 activeOpacity={0.65}
               >
-                <Text style={[tp.optText, isActive && tp.optTextActive]}>{opt}</Text>
+                <Text style={[tp.optText, isActive && tp.optTextActive]}>{translateTiming(opt)}</Text>
                 {isActive
                   ? <Ionicons name="checkmark-circle" size={20} color={C.accent} />
                   : <Ionicons name="chevron-forward" size={16} color={C.border} />
@@ -275,7 +302,7 @@ function TimingPickerModal({ current, onSelect, onClose }: TimingPickerProps) {
           })}
           <View style={m.divider} />
           <TouchableOpacity style={m.secondaryBtn} onPress={onClose}>
-            <Text style={m.secondaryBtnText}>取消</Text>
+            <Text style={m.secondaryBtnText}>{i18n.t('common.cancel')}</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>
@@ -298,7 +325,7 @@ function CatSwitcherModal({ items, current, onSelect, onClose }: CatSwitcherProp
       <Pressable style={m.overlay} onPress={onClose}>
         <Pressable style={m.card} onPress={() => {}}>
           <View style={cs.header}>
-            <Text style={m.modalTitle}>切換大類</Text>
+            <Text style={m.modalTitle}>{i18n.t('dashboard.switchCategory')}</Text>
             <TouchableOpacity style={m.closeBtn} onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={18} color={C.textSecondary} />
             </TouchableOpacity>
@@ -323,7 +350,7 @@ function CatSwitcherModal({ items, current, onSelect, onClose }: CatSwitcherProp
           })}
           <View style={m.divider} />
           <TouchableOpacity style={m.secondaryBtn} onPress={onClose}>
-            <Text style={m.secondaryBtnText}>取消</Text>
+            <Text style={m.secondaryBtnText}>{i18n.t('common.cancel')}</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>
@@ -375,7 +402,7 @@ function DiscountModal({ onClose }: DiscountModalProps) {
   }
 
   function formatExpiry(dateStr: string | null): string {
-    if (!dateStr) return '無限期';
+    if (!dateStr) return i18n.t('dashboard.unlimited');
     const d = new Date(dateStr);
     return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
   }
@@ -387,7 +414,7 @@ function DiscountModal({ onClose }: DiscountModalProps) {
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Ionicons name="pricetag-outline" size={18} color={C.accent} />
-              <Text style={m.modalTitle}>折扣碼</Text>
+              <Text style={m.modalTitle}>{i18n.t('dashboard.discountCodes')}</Text>
             </View>
             <TouchableOpacity style={m.closeBtn} onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={18} color={C.textSecondary} />
@@ -398,9 +425,9 @@ function DiscountModal({ onClose }: DiscountModalProps) {
           {loading ? (
             <ActivityIndicator color={C.accent} style={{ marginVertical: 24 }} />
           ) : error ? (
-            <Text style={dc.errorText}>無法取得折扣碼，請稍後再試</Text>
+            <Text style={dc.errorText}>{i18n.t('dashboard.discountError')}</Text>
           ) : codes.length === 0 ? (
-            <Text style={dc.errorText}>目前沒有可用的折扣碼</Text>
+            <Text style={dc.errorText}>{i18n.t('dashboard.discountEmpty')}</Text>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false}>
               {codes.map(code => {
@@ -420,7 +447,7 @@ function DiscountModal({ onClose }: DiscountModalProps) {
                         <View style={dc.metaChip}>
                           <Ionicons name="calendar-outline" size={11} color={C.textSecondary} />
                           <Text style={[dc.metaChipText, { color: C.textSecondary }]}>
-                            有效至 {formatExpiry(code.expiry_date)}
+                            {i18n.t('dashboard.validUntil', { date: formatExpiry(code.expiry_date) })}
                           </Text>
                         </View>
                       </View>
@@ -435,7 +462,7 @@ function DiscountModal({ onClose }: DiscountModalProps) {
                         size={16}
                         color="#fff"
                       />
-                      <Text style={dc.copyBtnText}>{isCopied ? '已複製 ✓' : '複製'}</Text>
+                      <Text style={dc.copyBtnText}>{isCopied ? i18n.t('common.copied') : i18n.t('common.copy')}</Text>
                     </TouchableOpacity>
                   </View>
                 );
@@ -506,7 +533,7 @@ function CategoryModal({
                 onPress={() => onConfirmRename(nameInput)}
                 activeOpacity={0.8}
               >
-                <Text style={mo.confirmBtnText}>確認</Text>
+                <Text style={mo.confirmBtnText}>{i18n.t('common.confirm')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={m.closeBtn} onPress={onClose} hitSlop={8}>
                 <Ionicons name="close" size={18} color={C.textSecondary} />
@@ -530,16 +557,16 @@ function CategoryModal({
           <View style={m.divider} />
 
           {/* ── Stock Details ── */}
-          <Text style={m.sectionLabel}>庫存詳情</Text>
-          <DetailRow icon="layers-outline" label="剩餘數量" value={`${qty} ${doseUnit}`} />
-          <EditableDetailRow icon="repeat-outline" label="每日用量" value={`${dose} ${doseUnit}／天`} onPress={onEditDose} />
-          <DetailRow icon="calendar-outline" label="預計用完" value={calcFinishDate(qty, dose)} />
-          <EditableDetailRow icon="time-outline" label="服用時機" value={timing} onPress={onEditTiming} />
+          <Text style={m.sectionLabel}>{i18n.t('dashboard.stockDetails')}</Text>
+          <DetailRow icon="layers-outline" label={i18n.t('dashboard.remaining')} value={`${qty} ${translateDoseUnit(doseUnit)}`} />
+          <EditableDetailRow icon="repeat-outline" label={i18n.t('dashboard.dailyDose')} value={i18n.t('dashboard.dailyDoseValue', { dose, unit: translateDoseUnit(doseUnit) })} onPress={onEditDose} />
+          <DetailRow icon="calendar-outline" label={i18n.t('dashboard.estimatedFinish')} value={calcFinishDate(qty, dose)} />
+          <EditableDetailRow icon="time-outline" label={i18n.t('dashboard.timing')} value={translateTiming(timing)} onPress={onEditTiming} />
 
           <View style={m.divider} />
 
           {/* ── Qty Adjuster ── */}
-          <Text style={m.sectionLabel}>手動調整庫存</Text>
+          <Text style={m.sectionLabel}>{i18n.t('dashboard.adjustStock')}</Text>
           <View style={m.qtyRow}>
             <TouchableOpacity
               style={[m.qtyBtn, qty <= 0 && m.qtyBtnDisabled]}
@@ -550,14 +577,13 @@ function CategoryModal({
             </TouchableOpacity>
             <View style={m.qtyDisplay}>
               <Text style={m.qtyNum}>{qty}</Text>
-              <Text style={m.qtyUnit}>{doseUnit}</Text>
+              <Text style={m.qtyUnit}>{translateDoseUnit(doseUnit)}</Text>
             </View>
             <TouchableOpacity
-              style={[m.qtyBtn, qty >= primaryBottleSize && m.qtyBtnDisabled]}
-              onPress={() => onChangeQty(Math.min(primaryBottleSize, qty + 1))}
-              disabled={qty >= primaryBottleSize}
+              style={m.qtyBtn}
+              onPress={() => onChangeQty(qty + 1)}
             >
-              <Ionicons name="add" size={22} color={qty >= primaryBottleSize ? C.border : C.textPrimary} />
+              <Ionicons name="add" size={22} color={C.textPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -568,12 +594,20 @@ function CategoryModal({
             activeOpacity={0.8}
           >
             <Ionicons name="checkmark-circle-outline" size={16} color={isDirty ? '#fff' : C.textSecondary} />
-            <Text style={[m.saveBtnText, !isDirty && m.saveBtnTextDisabled]}>確定修改</Text>
+            <Text style={[m.saveBtnText, !isDirty && m.saveBtnTextDisabled]}>{i18n.t('common.save')}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={m.resetBtn} onPress={onReset}>
+          <TouchableOpacity
+            style={[m.resetBtn, primaryBottleSize <= 0 && { opacity: 0.35 }]}
+            onPress={primaryBottleSize > 0 ? onReset : undefined}
+            disabled={primaryBottleSize <= 0}
+          >
             <Ionicons name="refresh-outline" size={13} color={C.textSecondary} />
-            <Text style={m.resetText}>重置為滿（{primaryBottleSize} {doseUnit}）</Text>
+            <Text style={m.resetText}>
+              {primaryBottleSize > 0
+                ? i18n.t('dashboard.resetToFull', { size: primaryBottleSize, unit: translateDoseUnit(doseUnit) })
+                : i18n.t('dashboard.resetToFullUnset')}
+            </Text>
           </TouchableOpacity>
 
           <View style={m.divider} />
@@ -584,16 +618,16 @@ function CategoryModal({
             activeOpacity={0.8}
           >
             <Ionicons name="cart-outline" size={16} color="#fff" />
-            <Text style={m.primaryBtnText}>前往補貨</Text>
+            <Text style={m.primaryBtnText}>{i18n.t('dashboard.restock')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={m.deleteBtn} onPress={onDelete} activeOpacity={0.8}>
             <Ionicons name="trash-outline" size={15} color={C.red} />
-            <Text style={m.deleteBtnText}>刪除品項</Text>
+            <Text style={m.deleteBtnText}>{i18n.t('dashboard.deleteItem')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={m.secondaryBtn} onPress={onClose} activeOpacity={0.7}>
-            <Text style={m.secondaryBtnText}>關閉</Text>
+            <Text style={m.secondaryBtnText}>{i18n.t('common.close')}</Text>
           </TouchableOpacity>
 
         </Pressable>
@@ -611,21 +645,70 @@ type SubItemAdjustProps = {
   onConfirm: () => void;
   onDelete: () => void;
   onClose: () => void;
+  onUpdateBrandSpec: (brand: string, spec: string) => void;
 };
 
-function SubItemAdjustModal({ sub, qty, onChangeQty, onConfirm, onDelete, onClose }: SubItemAdjustProps) {
+function SubItemAdjustModal({ sub, qty, onChangeQty, onConfirm, onDelete, onClose, onUpdateBrandSpec }: SubItemAdjustProps) {
+  const [editingMeta, setEditingMeta] = useState(false);
+  const [brandInput, setBrandInput] = useState(sub.brand);
+  const [specInput, setSpecInput] = useState(sub.spec);
+
+  function handleMetaConfirm() {
+    onUpdateBrandSpec(brandInput.trim(), specInput.trim());
+    setEditingMeta(false);
+  }
+
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onClose}>
       <Pressable style={m.overlay} onPress={onClose}>
         <Pressable style={m.card} onPress={() => {}}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-            <Text style={m.modalTitle}>調整庫存</Text>
+            <Text style={m.modalTitle}>{i18n.t('dashboard.adjustSubItem')}</Text>
             <TouchableOpacity style={m.closeBtn} onPress={onClose} hitSlop={8}>
               <Ionicons name="close" size={18} color={C.textSecondary} />
             </TouchableOpacity>
           </View>
-          <Text style={m.modalSubtitle}>{sub.brand}</Text>
-          <Text style={[m.modalSubtitle, { marginTop: 2 }]}>{sub.spec}</Text>
+
+          {editingMeta ? (
+            <View style={{ marginBottom: 4 }}>
+              <TextInput
+                style={sa.metaInput}
+                value={brandInput}
+                onChangeText={setBrandInput}
+                placeholder="Brand"
+                placeholderTextColor={C.textSecondary}
+                autoFocus
+                returnKeyType="next"
+              />
+              <TextInput
+                style={[sa.metaInput, { marginTop: 6 }]}
+                value={specInput}
+                onChangeText={setSpecInput}
+                placeholder="Spec"
+                placeholderTextColor={C.textSecondary}
+                returnKeyType="done"
+                onSubmitEditing={handleMetaConfirm}
+              />
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                <TouchableOpacity style={[m.secondaryBtn, { flex: 1 }]} onPress={() => { setBrandInput(sub.brand); setSpecInput(sub.spec); setEditingMeta(false); }}>
+                  <Text style={m.secondaryBtnText}>{i18n.t('common.cancel')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[m.saveBtn, { flex: 1 }]} onPress={handleMetaConfirm} activeOpacity={0.8}>
+                  <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
+                  <Text style={m.saveBtnText}>{i18n.t('common.confirm')}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity style={sa.metaRow} onPress={() => setEditingMeta(true)} activeOpacity={0.7}>
+              <View style={{ flex: 1 }}>
+                <Text style={m.modalSubtitle}>{sub.brand}</Text>
+                <Text style={[m.modalSubtitle, { marginTop: 2 }]}>{sub.spec}</Text>
+              </View>
+              <Ionicons name="pencil-outline" size={16} color={C.accent} style={{ marginLeft: 8 }} />
+            </TouchableOpacity>
+          )}
+
           <View style={m.divider} />
           <View style={m.qtyRow}>
             <TouchableOpacity
@@ -637,7 +720,7 @@ function SubItemAdjustModal({ sub, qty, onChangeQty, onConfirm, onDelete, onClos
             </TouchableOpacity>
             <View style={m.qtyDisplay}>
               <Text style={m.qtyNum}>{qty}</Text>
-              <Text style={m.qtyUnit}>{sub.doseUnit}</Text>
+              <Text style={m.qtyUnit}>{translateDoseUnit(sub.doseUnit)}</Text>
             </View>
             <TouchableOpacity style={m.qtyBtn} onPress={() => onChangeQty(qty + 1)}>
               <Ionicons name="add" size={22} color={C.textPrimary} />
@@ -646,15 +729,92 @@ function SubItemAdjustModal({ sub, qty, onChangeQty, onConfirm, onDelete, onClos
           <View style={m.divider} />
           <TouchableOpacity style={m.saveBtn} onPress={onConfirm} activeOpacity={0.8}>
             <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
-            <Text style={m.saveBtnText}>確定修改</Text>
+            <Text style={m.saveBtnText}>{i18n.t('common.save')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[m.secondaryBtn, { marginTop: 10 }]} onPress={onClose} activeOpacity={0.7}>
-            <Text style={m.secondaryBtnText}>取消</Text>
+            <Text style={m.secondaryBtnText}>{i18n.t('common.cancel')}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={m.deleteBtn} onPress={onDelete} activeOpacity={0.8}>
             <Ionicons name="trash-outline" size={15} color={C.red} />
-            <Text style={m.deleteBtnText}>刪除此子品項</Text>
+            <Text style={m.deleteBtnText}>{i18n.t('dashboard.deleteSubItem')}</Text>
           </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
+// ─── Quick Add Modal ──────────────────────────────────────────────────────────
+
+type QuickAddModalProps = {
+  existingNames: string[];
+  onConfirm: (name: string, qty: number) => void;
+  onClose: () => void;
+};
+
+function QuickAddModal({ existingNames, onConfirm, onClose }: QuickAddModalProps) {
+  const [name, setName] = useState('');
+  const [qty, setQty] = useState('');
+
+  function handleConfirm() {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      Alert.alert('', i18n.t('dashboard.quickAddEmptyName'));
+      return;
+    }
+    if (existingNames.some(n => n === trimmedName)) {
+      Alert.alert('', i18n.t('dashboard.quickAddDuplicate'));
+      return;
+    }
+    const qtyNum = parseInt(qty, 10);
+    if (isNaN(qtyNum) || qtyNum <= 0) {
+      Alert.alert('', i18n.t('dashboard.quickAddInvalidQty'));
+      return;
+    }
+    onConfirm(trimmedName, qtyNum);
+  }
+
+  return (
+    <Modal transparent animationType="fade" visible onRequestClose={onClose}>
+      <Pressable style={m.overlay} onPress={onClose}>
+        <Pressable style={m.card} onPress={() => {}}>
+          <View style={qa.header}>
+            <Ionicons name="add-circle-outline" size={18} color={C.accent} />
+            <Text style={[m.modalTitle, { flex: 1 }]}>{i18n.t('dashboard.quickAdd')}</Text>
+            <TouchableOpacity style={m.closeBtn} onPress={onClose} hitSlop={8}>
+              <Ionicons name="close" size={18} color={C.textSecondary} />
+            </TouchableOpacity>
+          </View>
+          <View style={m.divider} />
+          <Text style={qa.label}>{i18n.t('dashboard.quickAddName')}</Text>
+          <TextInput
+            style={qa.input}
+            value={name}
+            onChangeText={setName}
+            placeholder={i18n.t('dashboard.quickAddNamePlaceholder')}
+            placeholderTextColor={C.textSecondary}
+            autoFocus
+            returnKeyType="next"
+          />
+          <Text style={[qa.label, { marginTop: 14 }]}>{i18n.t('dashboard.quickAddQty')}</Text>
+          <TextInput
+            style={qa.input}
+            value={qty}
+            onChangeText={t => setQty(t.replace(/[^0-9]/g, ''))}
+            placeholder={i18n.t('dashboard.quickAddQtyPlaceholder')}
+            placeholderTextColor={C.textSecondary}
+            keyboardType="numeric"
+            returnKeyType="done"
+          />
+          <View style={m.divider} />
+          <View style={qa.btnRow}>
+            <TouchableOpacity style={[m.secondaryBtn, { flex: 1 }]} onPress={onClose}>
+              <Text style={m.secondaryBtnText}>{i18n.t('common.cancel')}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[qa.confirmBtn, { flex: 1 }]} onPress={handleConfirm} activeOpacity={0.8}>
+              <Text style={qa.confirmBtnText}>{i18n.t('dashboard.quickAddConfirm')}</Text>
+            </TouchableOpacity>
+          </View>
         </Pressable>
       </Pressable>
     </Modal>
@@ -664,6 +824,7 @@ function SubItemAdjustModal({ sub, qty, onChangeQty, onConfirm, onDelete, onClos
 // ─── Low Stock Notification ───────────────────────────────────────────────────
 
 async function checkLowStockNotifications(items: CategoryItem[]): Promise<void> {
+  if (isExpoGo) return;
   try {
     const enabled = await getSetting('notifications_enabled');
     if (enabled === 'false') return;
@@ -681,8 +842,8 @@ async function checkLowStockNotifications(items: CategoryItem[]): Promise<void> 
     for (const { cat: _cat, si, days } of lowItems) {
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: '⚠️ 庫存即將不足',
-          body: `${si.brand} ${si.spec} 剩餘約 ${days} 天，記得補貨！`,
+          title: i18n.t('dashboard.notifTitle'),
+          body: i18n.t('dashboard.notifBody', { name: `${si.brand} ${si.spec}`, days }),
         },
         trigger: null,
       });
@@ -699,11 +860,13 @@ async function checkLowStockNotifications(items: CategoryItem[]): Promise<void> 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function DashboardScreen() {
+  const { language } = useLanguage();
   const { renameCategory, addCategory, removeCategory, consumePendingItems, isReady } = useCategories();
   const [activeAccount, setActiveAccount] = useState(0);
   const [items, setItems] = useState<CategoryItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(true);
   const itemsReadyRef = useRef(false);
+  const isDeductingRef = useRef(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [showDiscountModal, setShowDiscountModal] = useState(false);
 
@@ -727,13 +890,18 @@ export default function DashboardScreen() {
   const [subItemAdjustTarget, setSubItemAdjustTarget] = useState<{ sub: SubItem; catId: string } | null>(null);
   const [subItemAdjustQty, setSubItemAdjustQty] = useState(0);
 
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+
   const [country, setCountry] = useState<CountryCode>('TW');
   const [sortPreference, setSortPreference] = useState<'days' | 'custom'>('days');
   const [defaultRestockPlatform, setDefaultRestockPlatform] = useState<RestockPlatform>('iherb');
+  const [showBeginnerGuide, setShowBeginnerGuide] = useState(true);
   const [taxData, setTaxData] = useState({
     usedCount: 0, remainCount: 0, spentAmount: 0, remainAmount: 0, pct: 0,
   });
   const alertCat = items.find(cat => categoryTotalDays(cat) <= 7);
+
+  const ACCOUNTS = [i18n.t('common.person'), i18n.t('dashboard.multiAccount')];
 
   // ── Load items from DB once CategoriesContext is ready ────────────────
   useEffect(() => {
@@ -772,11 +940,14 @@ export default function DashboardScreen() {
     React.useCallback(() => {
       async function loadTaxData() {
         try {
-          const [savedCountry, savedSort, savedPlatform] = await Promise.all([
+          const [savedCountry, savedSort, savedPlatform, savedGuide, taxOv] = await Promise.all([
             getSetting('country'),
             getSetting('sort_preference'),
             getSetting('default_restock_platform'),
+            getSetting('show_beginner_guide'),
+            getSetting('tax_threshold_override'),
           ]);
+          setShowBeginnerGuide(savedGuide !== '0');
           const c: CountryCode =
             savedCountry === 'TW' || savedCountry === 'JP' || savedCountry === 'KR' || savedCountry === 'OFF'
               ? savedCountry
@@ -788,10 +959,12 @@ export default function DashboardScreen() {
           }
 
           const rule = COUNTRY_RULES[c];
+          const parsedOv = taxOv ? parseFloat(taxOv) : NaN;
+          const activeTaxThreshold = (Number.isFinite(parsedOv) && parsedOv > 0) ? parsedOv : rule.taxFreePerOrder;
           const orders = await loadOrders();
 
           if (c === 'OFF') {
-            const allSpent = orders.reduce((s, o) => s + o.totalAmount, 0);
+            const allSpent = orders.filter(o => o.isOverseas).reduce((s, o) => s + o.totalAmount, 0);
             setTaxData({ usedCount: 0, remainCount: 0, spentAmount: allSpent, remainAmount: 0, pct: 0 });
             return;
           }
@@ -799,7 +972,7 @@ export default function DashboardScreen() {
           const [start, end] = halfYearRange();
           const periodOrders = orders.filter(o => {
             const d = new Date(o.date);
-            return d >= start && d <= end && o.totalAmount <= rule.taxFreePerOrder;
+            return d >= start && d <= end && o.totalAmount <= activeTaxThreshold && o.isOverseas;
           });
           const count = periodOrders.length;
           const spent = periodOrders.reduce((s, o) => s + o.totalAmount, 0);
@@ -810,7 +983,7 @@ export default function DashboardScreen() {
               usedCount: count,
               remainCount: remain,
               spentAmount: spent,
-              remainAmount: remain * rule.taxFreePerOrder,
+              remainAmount: remain * activeTaxThreshold,
               pct: Math.min(count / rule.quotaCount, 1),
             });
           } else {
@@ -833,16 +1006,20 @@ export default function DashboardScreen() {
     React.useCallback(() => {
       const pending = consumeRef.current();
       if (pending.length === 0) return;
+      const pendingSources: Array<{ categoryItemId: string; url: string }> = [];
       setItems(prev => {
         let next = [...prev];
-        for (const { categoryName, subItem } of pending) {
+        for (const { categoryName, subItem, sourceUrl } of pending) {
           const idx = next.findIndex(c => c.name === categoryName);
           if (idx >= 0) {
+            const catId = next[idx].id;
             next = next.map((cat, i) => {
               if (i !== idx) return cat;
-              const existIdx = cat.subItems.findIndex(si => si.spec === subItem.spec);
+              const existIdx = cat.subItems.findIndex(
+                si => normalizeKey(si.brand, si.spec) === normalizeKey(subItem.brand, subItem.spec)
+              );
               if (existIdx >= 0) {
-                // Same spec already exists → accumulate remaining
+                // Same product already exists → accumulate remaining
                 const newSubs = cat.subItems.map((si, j) =>
                   j === existIdx ? { ...si, remaining: si.remaining + subItem.remaining } : si
                 );
@@ -850,9 +1027,11 @@ export default function DashboardScreen() {
               }
               return { ...cat, subItems: [...cat.subItems, subItem] };
             });
+            if (sourceUrl) pendingSources.push({ categoryItemId: catId, url: sourceUrl });
           } else {
+            const newId = `cat_${Date.now()}_${Math.random().toString(36).slice(2)}`;
             next = [...next, {
-              id: `cat_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+              id: newId,
               name: categoryName,
               nameEn: '',
               maxDays: 30,
@@ -862,10 +1041,35 @@ export default function DashboardScreen() {
               iherbUrl: buildIHerbSearchUrl(categoryName),
               subItems: [subItem],
             }];
+            if (sourceUrl) pendingSources.push({ categoryItemId: newId, url: sourceUrl });
           }
         }
         return next;
       });
+      for (const src of pendingSources) {
+        upsertProductSource(src).catch(e => console.error('upsertProductSource error', e));
+      }
+    }, [])
+  );
+
+  // ── Daily deduction on every focus ────────────────────────────────────
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!itemsReadyRef.current) return;
+      if (isDeductingRef.current) return;
+      isDeductingRef.current = true;
+      (async () => {
+        try {
+          await runDailyDeductionIfNeeded();
+          const refreshed = await loadCategoryItems();
+          if (refreshed.length > 0) setItems(refreshed);
+        } catch (e) {
+          console.error('daily deduction focus error', e);
+        } finally {
+          isDeductingRef.current = false;
+        }
+      })();
     }, [])
   );
 
@@ -942,13 +1146,13 @@ export default function DashboardScreen() {
     }
 
     if (!trimmed) {
-      Alert.alert('名稱不可為空');
+      Alert.alert(i18n.t('dashboard.nameEmpty'));
       return;
     }
 
     const isDuplicate = items.some(cat => cat.id !== selectedCat.id && cat.name === trimmed);
     if (isDuplicate) {
-      Alert.alert('名稱重複', '已有相同的大類名稱，請使用其他名稱');
+      Alert.alert(i18n.t('dashboard.nameDuplicate'), i18n.t('dashboard.nameDuplicateMsg'));
       return;
     }
 
@@ -960,18 +1164,49 @@ export default function DashboardScreen() {
     setEditingName(false);
   }
 
-  function handleSubItemPress(sub: SubItem, parentCat: CategoryItem) {
-    const keyword = `${sub.brand} ${sub.spec}`;
-    const platform = detectPlatform(sub.iherbUrl);
-    const url = platform
-      ? buildRestockUrl(sub.iherbUrl, keyword)
-      : buildPlatformSearchUrl(keyword, defaultRestockPlatform);
+  async function handleSubItemPress(sub: SubItem, parentCat: CategoryItem) {
+    const keyword = `${sub.brand} ${sub.spec}`.trim();
+    const productId = sub.id;
+    const baseUrl = await getProductUrl(sub.id, sub.iherbUrl);
+    let url: string;
+
+    if (baseUrl) {
+      const platform = detectPlatform(baseUrl);
+      if (platform === 'iherb') {
+        url = buildIHerbSearchUrl(keyword);
+      } else if (platform === 'amazon') {
+        const asin = baseUrl.match(/\/dp\/([A-Z0-9]{10})/)?.[1];
+        url = asin
+          ? `https://www.amazon.com/dp/${asin}?tag=${AMAZON_TAG}`
+          : buildPlatformSearchUrl(keyword, 'amazon');
+      } else if (platform === 'vitacost' || platform === 'swanson') {
+        url = baseUrl;
+      } else {
+        url = buildPlatformSearchUrl(keyword, defaultRestockPlatform);
+      }
+    } else {
+      url = buildPlatformSearchUrl(keyword, defaultRestockPlatform);
+    }
+
     Alert.alert(
-      '補充保健品',
+      i18n.t('dashboard.restockAlert'),
       `${sub.brand}\n${sub.spec}`,
       [
-        { text: '取消', style: 'cancel' },
-        { text: '前往補貨', onPress: () => Linking.openURL(url) },
+        { text: i18n.t('common.cancel'), style: 'cancel' },
+        { text: i18n.t('dashboard.restock'), onPress: () =>
+          Linking.openURL(url)
+            .then(() => {
+              logEvent({
+                event_type: 'click_product',
+                target_type: 'product',
+                target_id: productId || url,
+                context: { screen: 'DashboardScreen', url: url },
+              });
+            })
+            .catch((err) => {
+              console.warn('Could not open URL:', err);
+            })
+        },
       ],
     );
   }
@@ -1018,6 +1253,24 @@ export default function DashboardScreen() {
     }
   }
 
+  async function handleUpdateSubItemBrandSpec(brand: string, spec: string) {
+    if (!subItemAdjustTarget) return;
+    const { sub, catId } = subItemAdjustTarget;
+    setSubItemAdjustTarget(prev => prev ? { ...prev, sub: { ...prev.sub, brand, spec } } : prev);
+    setItems(prev => prev.map(cat => {
+      if (cat.id !== catId) return cat;
+      return {
+        ...cat,
+        subItems: cat.subItems.map(si => si.id === sub.id ? { ...si, brand, spec } : si),
+      };
+    }));
+    try {
+      await updateSubItemBrandSpec(sub.id, brand, spec);
+    } catch (e) {
+      console.error('updateSubItemBrandSpec DB error', e);
+    }
+  }
+
   function handleDeleteSubItem() {
     if (!subItemAdjustTarget) return;
     const { sub, catId } = subItemAdjustTarget;
@@ -1025,12 +1278,12 @@ export default function DashboardScreen() {
     if (!cat) return;
 
     Alert.alert(
-      '確認刪除',
-      `確定移除「${sub.brand} ${sub.spec}」？此操作無法復原。`,
+      i18n.t('dashboard.deleteSubItemTitle'),
+      i18n.t('dashboard.deleteSubItemMsg', { name: `${sub.brand} ${sub.spec}` }),
       [
-        { text: '取消', style: 'cancel' },
+        { text: i18n.t('common.cancel'), style: 'cancel' },
         {
-          text: '確認刪除',
+          text: i18n.t('common.confirmDelete'),
           style: 'destructive',
           onPress: () => {
             setShowSubItemAdjust(false);
@@ -1082,12 +1335,12 @@ export default function DashboardScreen() {
     if (!cat) return;
     closeModal();
     Alert.alert(
-      '確認刪除',
-      `確定要移除「${cat.name}」及其所有子項目嗎？`,
+      i18n.t('dashboard.deleteCategoryTitle'),
+      i18n.t('dashboard.deleteCategoryMsg', { name: cat.name }),
       [
-        { text: '取消', style: 'cancel', onPress: () => openModal(cat) },
+        { text: i18n.t('common.cancel'), style: 'cancel', onPress: () => openModal(cat) },
         {
-          text: '確認刪除',
+          text: i18n.t('common.confirmDelete'),
           style: 'destructive',
           onPress: () => {
             setItems(prev => prev.filter(c => c.id !== cat.id));
@@ -1102,6 +1355,33 @@ export default function DashboardScreen() {
     const cat = items.find(c => c.name === catName);
     if (cat) openModal(cat);
     setShowCatSwitcher(false);
+  }
+
+  function handleQuickAdd(name: string, qty: number) {
+    const now = Date.now();
+    const newCat: CategoryItem = {
+      id: `cat_${now}`,
+      name,
+      nameEn: '',
+      maxDays: 30,
+      dailyDose: 1,
+      doseUnit: '顆',
+      timing: '早餐後',
+      iherbUrl: '',
+      subItems: [{
+        id: `sub_${now}`,
+        brand: 'NA',
+        spec: 'NA',
+        remaining: qty,
+        bottleSize: qty,
+        doseUnit: '顆',
+        isActive: true,
+        iherbUrl: '',
+      }],
+    };
+    setItems(prev => [...prev, newCat]);
+    addCategory(name);
+    setShowQuickAdd(false);
   }
 
   // ── Render ─────────────────────────────────────────────────────────────
@@ -1148,6 +1428,31 @@ export default function DashboardScreen() {
           </View>
         </View>
 
+        {/* ── Beginner Guide Banner ── */}
+        {showBeginnerGuide && (
+          <TouchableOpacity
+            style={s.beginnerBtn}
+            onPress={() => Alert.alert(
+              i18n.t('common.beginner_guide'),
+              i18n.t('common.beginner_guide_confirm'),
+              [
+                { text: i18n.t('common.cancel'), style: 'cancel' },
+                { text: i18n.t('common.confirm'), onPress: () => {
+                  const guideUrl = language === 'en'
+                    ? 'https://kissgu24.github.io/uherbsync/guide-en.html'
+                    : 'https://kissgu24.github.io/uherbsync/guide-zh.html';
+                  Linking.openURL(guideUrl);
+                }},
+              ]
+            )}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="book-outline" size={15} color={C.accent} />
+            <Text style={s.beginnerBtnText}>{i18n.t('common.beginner_guide')}</Text>
+            <Ionicons name="chevron-forward" size={14} color={C.textSecondary} />
+          </TouchableOpacity>
+        )}
+
         {activeAccount === 0 ? (
           <>
             {/* ── Tax Quota Card ── */}
@@ -1155,8 +1460,10 @@ export default function DashboardScreen() {
               const rule = COUNTRY_RULES[country];
               const showCountCol = rule.quotaCount > 0 || country === 'OFF';
               const headerLabel = country === 'OFF'
-                ? '免稅追蹤（已停用）'
-                : `本期免稅額度（${halfYearLabel()}）`;
+                ? i18n.t('dashboard.taxTrackingOff')
+                : i18n.t('dashboard.taxQuotaLabel', { period: halfYearLabel() });
+              const currentMonth = new Date().getMonth() + 1;
+              const taxTitle = currentMonth <= 6 ? i18n.t('dashboard.tax_period_h1') : i18n.t('dashboard.tax_period_h2');
               return (
                 <View style={s.card}>
                   <View style={s.cardHeaderRow}>
@@ -1167,7 +1474,7 @@ export default function DashboardScreen() {
                     {showCountCol && (
                       <>
                         <View style={s.statItem}>
-                          <Text style={s.statMini}>已用筆數</Text>
+                          <Text style={s.statMini}>{i18n.t('dashboard.usedOrders')}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                             <Text style={s.statBig}>{taxData.usedCount}</Text>
                             {rule.quotaCount > 0 && (
@@ -1179,18 +1486,18 @@ export default function DashboardScreen() {
                       </>
                     )}
                     <View style={s.statItem}>
-                      <Text style={s.statMini}>累計花費</Text>
+                      <Text style={s.statMini}>{taxTitle}</Text>
                       <Text style={[s.statMed, { color: C.orange }]}>
-                        {formatCurrency(taxData.spentAmount, rule.currency || 'NT$')}
+                        {formatCurrency(taxData.spentAmount, language)}
                       </Text>
                     </View>
                     {showCountCol && (
                       <>
                         <View style={s.statDivider} />
                         <View style={s.statItem}>
-                          <Text style={s.statMini}>剩餘額度</Text>
+                          <Text style={s.statMini}>{i18n.t('dashboard.remainingQuota')}</Text>
                           <Text style={[s.statMed, { color: C.green }]}>
-                            {formatCurrency(taxData.remainAmount, rule.currency || 'NT$')}
+                            {formatCurrency(taxData.remainAmount, language)}
                           </Text>
                         </View>
                       </>
@@ -1200,10 +1507,10 @@ export default function DashboardScreen() {
                     <View style={[s.progressFill, { width: `${Math.round(taxData.pct * 100)}%` as `${number}%` }]} />
                   </View>
                   <View style={s.progressMeta}>
-                    <Text style={s.progressMetaText}>額度使用進度</Text>
+                    <Text style={s.progressMetaText}>{i18n.t('dashboard.quotaProgress')}</Text>
                     <Text style={[s.progressMetaText, { color: C.accent }]}>{Math.round(taxData.pct * 100)}%</Text>
                   </View>
-                  <Text style={s.taxDisclaimer}>※ 免稅規則僅供參考，實際以海關規定為準</Text>
+                  <Text style={s.taxDisclaimer}>{i18n.t('dashboard.taxDisclaimer')}</Text>
                 </View>
               );
             })()}
@@ -1215,14 +1522,19 @@ export default function DashboardScreen() {
                   <Ionicons name="warning" size={18} color="#fff" />
                 </View>
                 <Text style={s.alertText} numberOfLines={1}>
-                  {alertCat.name} 剩餘 {categoryTotalDays(alertCat)} 天，立即補貨
+                  {i18n.t('dashboard.alertBanner', { name: alertCat.name, days: categoryTotalDays(alertCat) })}
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
               </TouchableOpacity>
             )}
 
             {/* ── Category List ── */}
-            <Text style={s.sectionTitle}>保健品庫存</Text>
+            <View style={s.sectionTitleRow}>
+              <Text style={s.sectionTitle}>{i18n.t('dashboard.sectionTitle')}</Text>
+              <TouchableOpacity onPress={() => setShowQuickAdd(true)} hitSlop={8} activeOpacity={0.7}>
+                <Ionicons name="add-circle-outline" size={22} color={C.accent} />
+              </TouchableOpacity>
+            </View>
 
             {(sortPreference === 'days'
               ? [...items].sort((a, b) => categoryTotalDays(a) - categoryTotalDays(b))
@@ -1249,7 +1561,7 @@ export default function DashboardScreen() {
                           <View style={[s.colorDot, { backgroundColor: dotColor }]} />
                           <Text style={s.catName}>{cat.name}</Text>
                         </View>
-                        <Text style={[s.catDays, { color: dotColor }]}>{totalDays} 天</Text>
+                        <Text style={[s.catDays, { color: dotColor }]}>{totalDays}{i18n.t('common.daysUnit')}</Text>
                       </View>
                       <View style={s.catTrack}>
                         <View style={[s.catFill, {
@@ -1313,7 +1625,7 @@ export default function DashboardScreen() {
                               activeOpacity={0.7}
                             >
                               <Text style={s.subRemaining}>
-                                {sub.remaining} {sub.doseUnit}
+                                {sub.remaining} {translateDoseUnit(sub.doseUnit)}
                               </Text>
                             </TouchableOpacity>
                           </View>
@@ -1328,8 +1640,8 @@ export default function DashboardScreen() {
         ) : (
           <View style={s.comingSoonCard}>
             <Ionicons name="people-outline" size={48} color={C.textSecondary} />
-            <Text style={s.comingSoonTitle}>多帳號管理</Text>
-            <Text style={s.comingSoonDesc}>此功能即將推出，敬請期待！</Text>
+            <Text style={s.comingSoonTitle}>{i18n.t('dashboard.multiAccount')}</Text>
+            <Text style={s.comingSoonDesc}>{i18n.t('dashboard.multiAccountComingSoon')}</Text>
           </View>
         )}
 
@@ -1396,11 +1708,20 @@ export default function DashboardScreen() {
           onConfirm={saveSubItemQty}
           onDelete={handleDeleteSubItem}
           onClose={() => { setShowSubItemAdjust(false); setSubItemAdjustTarget(null); }}
+          onUpdateBrandSpec={handleUpdateSubItemBrandSpec}
         />
       )}
 
       {showDiscountModal && (
         <DiscountModal onClose={() => setShowDiscountModal(false)} />
+      )}
+
+      {showQuickAdd && (
+        <QuickAddModal
+          existingNames={items.map(c => c.name)}
+          onConfirm={handleQuickAdd}
+          onClose={() => setShowQuickAdd(false)}
+        />
       )}
 
     </SafeAreaView>
@@ -1452,6 +1773,14 @@ const s = StyleSheet.create({
   progressMetaText: { fontSize: 11, color: C.textSecondary },
   taxDisclaimer: { fontSize: 11, color: '#8B949E', textAlign: 'center', marginTop: 10 },
 
+  beginnerBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: C.accent + '12', borderRadius: 10,
+    borderWidth: 1, borderColor: C.accent + '40',
+    paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14,
+  },
+  beginnerBtnText: { flex: 1, fontSize: 13, fontWeight: '600', color: C.accent },
+
   alert: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#B91C1C',
     borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#EF4444',
@@ -1462,7 +1791,8 @@ const s = StyleSheet.create({
   },
   alertText: { flex: 1, color: '#fff', fontSize: 14, fontWeight: '600' },
 
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: C.textPrimary, marginBottom: 10, letterSpacing: 0.3 },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: C.textPrimary, letterSpacing: 0.3 },
 
   // ── Category card ──
   catCard: {
@@ -1726,4 +2056,32 @@ const dc = StyleSheet.create({
   },
   copyBtnDone: { backgroundColor: '#2EA043' },
   copyBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+});
+
+// ─── Styles: Quick Add Modal ──────────────────────────────────────────────────
+
+const sa = StyleSheet.create({
+  metaRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 6, marginBottom: 2,
+  },
+  metaInput: {
+    backgroundColor: '#21262D', borderRadius: 10, borderWidth: 1, borderColor: C.accent + '80',
+    paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: C.textPrimary,
+  },
+});
+
+const qa = StyleSheet.create({
+  header:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 2 },
+  label:      { fontSize: 13, fontWeight: '600', color: C.textSecondary, marginBottom: 6, letterSpacing: 0.3 },
+  input: {
+    backgroundColor: '#21262D', borderRadius: 10, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: C.textPrimary,
+  },
+  btnRow:      { flexDirection: 'row', gap: 10 },
+  confirmBtn: {
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#2EA043', borderRadius: 12, paddingVertical: 13,
+  },
+  confirmBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
