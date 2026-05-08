@@ -43,8 +43,6 @@ export const en = {
     estimatedFinish: 'Est. Finish',
     timing: 'Timing',
     adjustStock: 'Adjust Stock',
-    resetToFull: 'Reset to Full (%{size} %{unit})',
-    resetToFullUnset: 'Reset to Full (not set)',
     restock: 'Restock',
     deleteItem: 'Delete Item',
     adjustSubItem: 'Adjust Stock',

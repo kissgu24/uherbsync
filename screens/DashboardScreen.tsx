@@ -489,7 +489,6 @@ type CategoryModalProps = {
   restockUrl: string;
   onChangeQty: (n: number) => void;
   onSaveQty: () => void;
-  onReset: () => void;
   onEditDose: () => void;
   onEditTiming: () => void;
   onStartRename: () => void;
@@ -502,7 +501,7 @@ type CategoryModalProps = {
 function CategoryModal({
   item, qty, originalQty, dose, doseUnit, timing,
   editingName, nameInput, restockUrl,
-  onChangeQty, onSaveQty, onReset, onEditDose, onEditTiming,
+  onChangeQty, onSaveQty, onEditDose, onEditTiming,
   onStartRename, onConfirmRename, onNameInputChange,
   onDelete, onClose,
 }: CategoryModalProps) {
@@ -595,19 +594,6 @@ function CategoryModal({
           >
             <Ionicons name="checkmark-circle-outline" size={16} color={isDirty ? '#fff' : C.textSecondary} />
             <Text style={[m.saveBtnText, !isDirty && m.saveBtnTextDisabled]}>{i18n.t('common.save')}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[m.resetBtn, primaryBottleSize <= 0 && { opacity: 0.35 }]}
-            onPress={primaryBottleSize > 0 ? onReset : undefined}
-            disabled={primaryBottleSize <= 0}
-          >
-            <Ionicons name="refresh-outline" size={13} color={C.textSecondary} />
-            <Text style={m.resetText}>
-              {primaryBottleSize > 0
-                ? i18n.t('dashboard.resetToFull', { size: primaryBottleSize, unit: translateDoseUnit(doseUnit) })
-                : i18n.t('dashboard.resetToFullUnset')}
-            </Text>
           </TouchableOpacity>
 
           <View style={m.divider} />
@@ -889,6 +875,8 @@ export default function DashboardScreen() {
   const [showSubItemAdjust, setShowSubItemAdjust] = useState(false);
   const [subItemAdjustTarget, setSubItemAdjustTarget] = useState<{ sub: SubItem; catId: string } | null>(null);
   const [subItemAdjustQty, setSubItemAdjustQty] = useState(0);
+  const [inlineEditId, setInlineEditId] = useState<string | null>(null);
+  const [inlineEditValue, setInlineEditValue] = useState('');
 
   const [showQuickAdd, setShowQuickAdd] = useState(false);
 
@@ -1173,16 +1161,14 @@ export default function DashboardScreen() {
     if (baseUrl) {
       const platform = detectPlatform(baseUrl);
       if (platform === 'iherb') {
-        url = buildIHerbSearchUrl(keyword);
+        url = buildIHerbProductUrl(baseUrl);
       } else if (platform === 'amazon') {
         const asin = baseUrl.match(/\/dp\/([A-Z0-9]{10})/)?.[1];
         url = asin
           ? `https://www.amazon.com/dp/${asin}?tag=${AMAZON_TAG}`
           : buildPlatformSearchUrl(keyword, 'amazon');
-      } else if (platform === 'vitacost' || platform === 'swanson') {
-        url = baseUrl;
       } else {
-        url = buildPlatformSearchUrl(keyword, defaultRestockPlatform);
+        url = baseUrl;
       }
     } else {
       url = buildPlatformSearchUrl(keyword, defaultRestockPlatform);
@@ -1215,6 +1201,20 @@ export default function DashboardScreen() {
     setSubItemAdjustTarget({ sub, catId: cat.id });
     setSubItemAdjustQty(sub.remaining);
     setShowSubItemAdjust(true);
+  }
+
+  async function handleInlineEditConfirm(sub: SubItem, catId: string, value: string) {
+    setInlineEditId(null);
+    const qty = Math.max(0, parseInt(value, 10) || 0);
+    setItems(prev => prev.map(cat =>
+      cat.id !== catId ? cat :
+      { ...cat, subItems: cat.subItems.map(si => si.id === sub.id ? { ...si, remaining: qty } : si) }
+    ));
+    try {
+      await updateSubItemRemaining(sub.id, qty);
+    } catch (e) {
+      console.error('inlineEditConfirm DB error', e);
+    }
   }
 
   async function handleToggleSubItemActive(sub: SubItem, catId: string) {
@@ -1619,15 +1619,32 @@ export default function DashboardScreen() {
                                 color={sub.isActive ? C.green : C.textSecondary}
                               />
                             </TouchableOpacity>
-                            <TouchableOpacity
-                              style={s.subItemRight}
-                              onPress={() => handleSubItemQtyPress(sub, cat)}
-                              activeOpacity={0.7}
-                            >
-                              <Text style={s.subRemaining}>
-                                {sub.remaining} {translateDoseUnit(sub.doseUnit)}
-                              </Text>
-                            </TouchableOpacity>
+                            {inlineEditId === sub.id ? (
+                              <View style={s.subItemRight}>
+                                <TextInput
+                                  style={s.subRemainingInput}
+                                  value={inlineEditValue}
+                                  onChangeText={setInlineEditValue}
+                                  onBlur={() => handleInlineEditConfirm(sub, cat.id, inlineEditValue)}
+                                  onSubmitEditing={() => handleInlineEditConfirm(sub, cat.id, inlineEditValue)}
+                                  keyboardType="numeric"
+                                  autoFocus
+                                  selectTextOnFocus
+                                  returnKeyType="done"
+                                  maxLength={5}
+                                />
+                              </View>
+                            ) : (
+                              <TouchableOpacity
+                                style={s.subItemRight}
+                                onPress={() => { setInlineEditId(sub.id); setInlineEditValue(String(sub.remaining)); }}
+                                activeOpacity={0.7}
+                              >
+                                <Text style={s.subRemaining}>
+                                  {sub.remaining} {translateDoseUnit(sub.doseUnit)}
+                                </Text>
+                              </TouchableOpacity>
+                            )}
                           </View>
                         );
                       })}
@@ -1663,7 +1680,6 @@ export default function DashboardScreen() {
           restockUrl={buildPlatformSearchUrl(selectedCat.nameEn || selectedCat.name, defaultRestockPlatform)}
           onChangeQty={setCurrentQty}
           onSaveQty={saveQty}
-          onReset={() => setCurrentQty(selectedCat.subItems[0]?.bottleSize ?? 60)}
           onEditDose={() => setShowDoseEditor(true)}
           onEditTiming={() => setShowTimingPicker(true)}
           onStartRename={() => { setEditingName(true); setNameInput(selectedCat.name); }}
@@ -1847,6 +1863,13 @@ const s = StyleSheet.create({
   subBrand:        { fontSize: 13, fontWeight: '600', color: C.textPrimary },
   subSpec:         { fontSize: 11, color: C.textSecondary, marginTop: 1 },
   subRemaining:    { fontSize: 12, fontWeight: '700', color: C.textSecondary },
+  subRemainingInput: {
+    fontSize: 12, fontWeight: '700', color: C.textPrimary,
+    backgroundColor: '#21262D', borderRadius: 6,
+    borderWidth: 1, borderColor: C.accent + '88',
+    width: 52, textAlign: 'center',
+    paddingHorizontal: 4, paddingVertical: 2,
+  },
 });
 
 // ─── Styles: Modal (shared) ───────────────────────────────────────────────────
@@ -1901,13 +1924,6 @@ const m = StyleSheet.create({
   saveBtnDisabled:    { backgroundColor: '#21262D', borderWidth: 1, borderColor: C.border },
   saveBtnText:        { color: '#fff', fontSize: 15, fontWeight: '700' },
   saveBtnTextDisabled: { color: C.textSecondary },
-
-  resetBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 5, paddingVertical: 8, borderRadius: 8,
-    backgroundColor: '#21262D', borderWidth: 1, borderColor: C.border,
-  },
-  resetText: { fontSize: 13, color: C.textSecondary },
 
   primaryBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

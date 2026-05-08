@@ -43,8 +43,6 @@ export const zh = {
     estimatedFinish: '預計用完',
     timing: '服用時機',
     adjustStock: '手動調整庫存',
-    resetToFull: '重置為滿（%{size} %{unit}）',
-    resetToFullUnset: '重置為滿（未設定）',
     restock: '前往補貨',
     deleteItem: '刪除品項',
     adjustSubItem: '調整庫存',
