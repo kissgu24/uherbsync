@@ -6,7 +6,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { CategoryItem, loadCategoryItems } from '../db/db';
+import { CategoryItem, loadCategoryItems, logEvent } from '../db/db';
+import { i18n } from '../i18n';
+import { useLanguage } from '../contexts/LanguageContext';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
@@ -23,71 +25,98 @@ const C = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const GENDERS = ['男', '女', '不透露'] as const;
-type Gender = typeof GENDERS[number] | '';
+const GENDER_KEYS = ['male', 'female', 'prefer_not'] as const;
+type GenderKey = typeof GENDER_KEYS[number] | '';
 
-const GOALS = ['延緩衰老', '健身', '改善膚質', '提升代謝', '改善經痛', '其他'] as const;
-type Goal = typeof GOALS[number];
+const GOAL_KEYS = ['anti_aging', 'fitness', 'skin', 'metabolism', 'menstrual', 'other'] as const;
+type GoalKey = typeof GOAL_KEYS[number];
 
-const QUESTIONS = [
-  { label: '補充方向評估', text: '評估我目前的保健品組合是否完整且合理？' },
-  { label: '覆蓋程度',     text: '有哪些成分可能重複或衝突？' },
-  { label: '檢視完整度',   text: '依照我的健康目標，建議我補充哪些目前缺少的保健品？' },
-  { label: '使用時機',     text: '服用時機和劑量有需要調整的地方嗎？' },
-  { label: '須注意事項',   text: '其他你認為我應該注意的事項？' },
-  { label: '評分',         text: '以健康目標配合補劑狀況，幫我評價一個 PR 等級（0~100），並說明原因。' },
-] as const;
+const QUESTION_COUNT = 6;
+
+// ─── i18n Helpers ─────────────────────────────────────────────────────────────
+
+function genderLabel(key: GenderKey): string {
+  const map: Record<string, string> = {
+    male:       i18n.t('analysis.genderMale'),
+    female:     i18n.t('analysis.genderFemale'),
+    prefer_not: i18n.t('analysis.genderPrivate'),
+  };
+  return map[key] ?? '';
+}
+
+function goalLabel(key: GoalKey): string {
+  const map: Record<string, string> = {
+    anti_aging: i18n.t('analysis.goalAntiAging'),
+    fitness:    i18n.t('analysis.goalFitness'),
+    skin:       i18n.t('analysis.goalSkin'),
+    metabolism: i18n.t('analysis.goalMetabolism'),
+    menstrual:  i18n.t('analysis.goalMenstrual'),
+    other:      i18n.t('analysis.goalOther'),
+  };
+  return map[key] ?? key;
+}
 
 // ─── Prompt Builder ───────────────────────────────────────────────────────────
 
 function buildPrompt(
-  gender: Gender,
+  gender: GenderKey,
   age: string,
-  goals: Goal[],
+  goals: GoalKey[],
   otherGoal: string,
   items: CategoryItem[],
   selectedSubIds: Set<string>,
   selectedQIds: Set<number>,
 ): string {
-  const genderStr = gender || '不詳';
-  const ageStr = age.trim() || '不詳';
-  const goalList = goals.map(g => (g === '其他' ? otherGoal.trim() || '其他' : g));
-  const goalsStr = goalList.length > 0 ? goalList.join('、') : '未填寫';
+  const genderStr = gender ? genderLabel(gender) : i18n.t('analysis.promptUnknown');
+  const ageStr    = age.trim() || i18n.t('analysis.promptUnknown');
+  const sep       = i18n.t('analysis.promptGoalSep');
+  const goalList  = goals.map(g =>
+    g === 'other' ? (otherGoal.trim() || i18n.t('analysis.goalOther')) : goalLabel(g)
+  );
+  const goalsStr = goalList.length > 0 ? goalList.join(sep) : i18n.t('analysis.promptNoGoals');
 
   const lines: string[] = [];
   for (const cat of items) {
     for (const sub of cat.subItems) {
       if (selectedSubIds.has(sub.id)) {
         lines.push(
-          `- ${cat.name}：${sub.brand} ${sub.spec}，每日 ${cat.dailyDose} ${cat.doseUnit}，${cat.timing}`,
+          i18n.t('analysis.promptSupLine', {
+            category: cat.name,
+            brand:    sub.brand,
+            spec:     sub.spec,
+            dose:     cat.dailyDose,
+            unit:     cat.doseUnit,
+            timing:   cat.timing,
+          }),
         );
       }
     }
   }
 
-  const supplementsBlock =
-    lines.length > 0 ? lines.join('\n') : '（未選擇任何保健品）';
+  const supplementsBlock = lines.length > 0 ? lines.join('\n') : i18n.t('analysis.promptNoSupplements');
 
-  const questionsBlock = QUESTIONS
-    .filter((_, i) => selectedQIds.has(i))
-    .map((q, idx) => `${idx + 1}. ${q.text}`)
+  const questionsBlock = Array.from({ length: QUESTION_COUNT }, (_, i) => i)
+    .filter(i => selectedQIds.has(i))
+    .map((i, idx) => `${idx + 1}. ${i18n.t(`analysis.q${i}Text`)}`)
     .join('\n');
 
-  return [
-    `我是一位 ${ageStr} 歲的 ${genderStr}，健康目標是：${goalsStr}。目前每天服用的保健品如下：`,
-    supplementsBlock,
-    '',
-    '請根據以上資訊：',
-    questionsBlock,
-  ].join('\n');
+  const intro      = i18n.t('analysis.promptIntro', { age: ageStr, gender: genderStr, goals: goalsStr });
+  const supsHeader = i18n.t('analysis.promptSupsHeader');
+  const askHeader  = i18n.t('analysis.promptAskHeader');
+
+  const parts = [intro];
+  if (supsHeader) parts.push(supsHeader);
+  parts.push(supplementsBlock, '', askHeader, questionsBlock);
+  return parts.join('\n');
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function AnalysisScreen() {
-  const [gender, setGender] = useState<Gender>('');
+  const { language } = useLanguage();
+  const [gender, setGender] = useState<GenderKey>('');
   const [age, setAge] = useState('');
-  const [goals, setGoals] = useState<Set<Goal>>(new Set());
+  const [goals, setGoals] = useState<Set<GoalKey>>(new Set());
   const [otherGoal, setOtherGoal] = useState('');
   const [items, setItems] = useState<CategoryItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(true);
@@ -97,9 +126,7 @@ export default function AnalysisScreen() {
   const [copied, setCopied] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshed, setRefreshed] = useState(false);
-  const [selectedQIds, setSelectedQIds] = useState<Set<number>>(
-    new Set([0])
-  );
+  const [selectedQIds, setSelectedQIds] = useState<Set<number>>(new Set([0]));
 
   async function loadItems() {
     const loaded = await loadCategoryItems();
@@ -116,13 +143,28 @@ export default function AnalysisScreen() {
 
   // ── Goal toggle ─────────────────────────────────────────────────────────────
 
-  function toggleGoal(g: Goal) {
+  function toggleGoal(g: GoalKey) {
+    const isSelecting = !goals.has(g);
+    const nextGoals = new Set(goals);
+    if (nextGoals.has(g)) nextGoals.delete(g);
+    else nextGoals.add(g);
     setGoals(prev => {
       const next = new Set(prev);
       if (next.has(g)) next.delete(g);
       else next.add(g);
       return next;
     });
+    if (isSelecting) {
+      logEvent({
+        event_type: 'select_reason',
+        target_type: 'reason',
+        target_id: g,
+        context: {
+          screen: 'AnalysisScreen',
+          current_selection: Array.from(nextGoals),
+        },
+      });
+    }
   }
 
   // ── Checklist toggle ────────────────────────────────────────────────────────
@@ -172,16 +214,13 @@ export default function AnalysisScreen() {
 
   function handleGenerate() {
     if (selectedQIds.size === 0) {
-      Alert.alert('提示', '請至少選擇一個問題');
+      Alert.alert(i18n.t('analysis.alertTitle'), i18n.t('analysis.alertMsg'));
       return;
     }
     const prompt = buildPrompt(
       gender, age,
-      Array.from(goals) as Goal[],
-      otherGoal,
-      items,
-      selectedSubIds,
-      selectedQIds,
+      Array.from(goals) as GoalKey[],
+      otherGoal, items, selectedSubIds, selectedQIds,
     );
     setGeneratedPrompt(prompt);
     setCopied(false);
@@ -205,67 +244,69 @@ export default function AnalysisScreen() {
       >
         {/* ── Header ── */}
         <View style={s.header}>
-          <Text style={s.brand}>AI 保健品</Text>
-          <Text style={s.brandAccent}>分析</Text>
+          <Text style={s.brand}>{i18n.t('analysis.titleMain')}</Text>
+          <Text style={s.brandAccent}>{i18n.t('analysis.titleAccent')}</Text>
         </View>
 
         {/* ── Section 1: Basic Info ── */}
-        <Text style={s.sectionTitle}>基本資料</Text>
+        <Text style={s.sectionTitle}>{i18n.t('analysis.basicInfo')}</Text>
         <View style={s.card}>
-          <Text style={s.fieldLabel}>性別</Text>
+          <Text style={s.fieldLabel}>{i18n.t('analysis.gender')}</Text>
           <View style={s.genderRow}>
-            {GENDERS.map(g => (
+            {GENDER_KEYS.map(key => (
               <TouchableOpacity
-                key={g}
-                style={[s.genderBtn, gender === g && s.genderBtnActive]}
-                onPress={() => setGender(g)}
+                key={key}
+                style={[s.genderBtn, gender === key && s.genderBtnActive]}
+                onPress={() => setGender(key)}
                 activeOpacity={0.75}
               >
-                <Text style={[s.genderText, gender === g && s.genderTextActive]}>{g}</Text>
+                <Text style={[s.genderText, gender === key && s.genderTextActive]}>
+                  {genderLabel(key)}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
 
-          <Text style={[s.fieldLabel, { marginTop: 18 }]}>年齡</Text>
+          <Text style={[s.fieldLabel, { marginTop: 18 }]}>{i18n.t('analysis.age')}</Text>
           <TextInput
             style={s.textInput}
             value={age}
             onChangeText={t => setAge(t.replace(/[^0-9]/g, ''))}
             keyboardType="numeric"
             maxLength={3}
-            placeholder="請輸入年齡"
+            placeholder={i18n.t('analysis.agePlaceholder')}
             placeholderTextColor={C.textSecondary}
             selectTextOnFocus
           />
         </View>
 
         {/* ── Section 2: Health Goals ── */}
-        <Text style={s.sectionTitle}>健康目標</Text>
+        <Text style={s.sectionTitle}>{i18n.t('analysis.healthGoals')}</Text>
         <View style={s.card}>
           <View style={s.goalsGrid}>
-            {GOALS.map(g => {
-              const active = goals.has(g);
+            {GOAL_KEYS.map(key => {
+              const active = goals.has(key);
               return (
                 <TouchableOpacity
-                  key={g}
+                  key={key}
                   style={[s.goalChip, active && s.goalChipActive]}
-                  onPress={() => toggleGoal(g)}
+                  onPress={() => toggleGoal(key)}
                   activeOpacity={0.75}
                 >
                   {active && (
                     <Ionicons name="checkmark" size={13} color={C.accent} style={{ marginRight: 4 }} />
                   )}
-                  <Text style={[s.goalText, active && s.goalTextActive]}>{g}</Text>
+                  <Text style={[s.goalText, active && s.goalTextActive]}>{goalLabel(key)}</Text>
                 </TouchableOpacity>
               );
             })}
           </View>
-          {goals.has('其他') && (
+          {goals.has('other') && (
             <TextInput
               style={[s.textInput, { marginTop: 12 }]}
               value={otherGoal}
               onChangeText={setOtherGoal}
-              placeholder="請描述你的健康目標"
+              placeholder={i18n.t('analysis.otherGoalPlaceholder')}
               placeholderTextColor={C.textSecondary}
               maxLength={100}
             />
@@ -274,9 +315,9 @@ export default function AnalysisScreen() {
 
         {/* ── Section 3: Supplement Checklist ── */}
         <View style={s.sectionTitleRow}>
-          <Text style={[s.sectionTitle, { marginBottom: 0 }]}>納入分析的保健品</Text>
+          <Text style={[s.sectionTitle, { marginBottom: 0 }]}>{i18n.t('analysis.supplementsTitle')}</Text>
           <View style={s.refreshRow}>
-            {refreshed && <Text style={s.refreshedText}>已更新</Text>}
+            {refreshed && <Text style={s.refreshedText}>{i18n.t('analysis.updated')}</Text>}
             <TouchableOpacity onPress={handleRefresh} disabled={refreshing} hitSlop={10}>
               <Ionicons
                 name="refresh-outline"
@@ -291,12 +332,12 @@ export default function AnalysisScreen() {
           <ActivityIndicator color={C.accent} style={{ marginVertical: 24 }} />
         ) : items.length === 0 ? (
           <View style={s.card}>
-            <Text style={s.emptyText}>尚無庫存資料，請先在主頁新增保健品</Text>
+            <Text style={s.emptyText}>{i18n.t('analysis.empty')}</Text>
           </View>
         ) : (
           items.map(cat => {
-            const subIds = cat.subItems.map(s => s.id);
-            const allSel = subIds.length > 0 && subIds.every(id => selectedSubIds.has(id));
+            const subIds  = cat.subItems.map(s => s.id);
+            const allSel  = subIds.length > 0 && subIds.every(id => selectedSubIds.has(id));
             const someSel = !allSel && subIds.some(id => selectedSubIds.has(id));
 
             return (
@@ -316,14 +357,18 @@ export default function AnalysisScreen() {
                   </View>
                   <Text style={s.catName}>{cat.name}</Text>
                   <Text style={s.catMeta} numberOfLines={1}>
-                    {cat.dailyDose} {cat.doseUnit}／天・{cat.timing}
+                    {i18n.t('analysis.catMetaFormat', {
+                      dose: cat.dailyDose,
+                      unit: cat.doseUnit,
+                      timing: cat.timing,
+                    })}
                   </Text>
                 </TouchableOpacity>
 
                 {/* Sub-items */}
                 {cat.subItems.map((sub, idx) => {
                   const checked = selectedSubIds.has(sub.id);
-                  const isLast = idx === cat.subItems.length - 1;
+                  const isLast  = idx === cat.subItems.length - 1;
                   return (
                     <TouchableOpacity
                       key={sub.id}
@@ -347,10 +392,10 @@ export default function AnalysisScreen() {
         )}
 
         {/* ── Section 4: Questions ── */}
-        <Text style={s.sectionTitle}>分析問題</Text>
+        <Text style={s.sectionTitle}>{i18n.t('analysis.questionsTitle')}</Text>
         <View style={s.card}>
           <View style={s.questionsGrid}>
-            {QUESTIONS.map((q, i) => {
+            {Array.from({ length: QUESTION_COUNT }, (_, i) => i).map(i => {
               const active = selectedQIds.has(i);
               return (
                 <TouchableOpacity
@@ -360,7 +405,7 @@ export default function AnalysisScreen() {
                   activeOpacity={0.75}
                 >
                   <Text style={[s.questionChipText, active && s.questionChipTextActive]}>
-                    {q.label}
+                    {i18n.t(`analysis.q${i}Label`)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -371,7 +416,7 @@ export default function AnalysisScreen() {
         {/* ── Generate Button ── */}
         <TouchableOpacity style={s.generateBtn} onPress={handleGenerate} activeOpacity={0.85}>
           <Ionicons name="sparkles-outline" size={18} color="#fff" />
-          <Text style={s.generateBtnText}>產出 AI 分析提示</Text>
+          <Text style={s.generateBtnText}>{i18n.t('analysis.generateBtn')}</Text>
         </TouchableOpacity>
 
         <View style={{ height: 32 }} />
@@ -391,7 +436,7 @@ export default function AnalysisScreen() {
               <View style={m.sheetHeader}>
                 <View style={m.sheetTitleRow}>
                   <Ionicons name="sparkles" size={18} color={C.accent} />
-                  <Text style={m.sheetTitle}>AI 分析提示詞</Text>
+                  <Text style={m.sheetTitle}>{i18n.t('analysis.promptTitle')}</Text>
                 </View>
                 <TouchableOpacity
                   style={m.closeBtn}
@@ -402,7 +447,7 @@ export default function AnalysisScreen() {
                 </TouchableOpacity>
               </View>
               <View style={m.divider} />
-              <Text style={m.disclaimer}>⚠️ 以下內容僅供參考，不構成醫療建議，請諮詢專業醫師或營養師後再調整保健品使用方式。</Text>
+              <Text style={m.disclaimer}>{i18n.t('analysis.disclaimer')}</Text>
               <ScrollView style={m.textScroll} showsVerticalScrollIndicator={false}>
                 <Text style={m.promptText} selectable>{generatedPrompt}</Text>
               </ScrollView>
@@ -417,7 +462,9 @@ export default function AnalysisScreen() {
                   size={18}
                   color="#fff"
                 />
-                <Text style={m.copyBtnText}>{copied ? '已複製 ✓' : '一鍵複製'}</Text>
+                <Text style={m.copyBtnText}>
+                  {copied ? i18n.t('analysis.copiedBtn') : i18n.t('analysis.copyBtn')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -487,7 +534,6 @@ const s = StyleSheet.create({
 
   emptyText: { fontSize: 14, color: C.textSecondary, textAlign: 'center', paddingVertical: 8 },
 
-  // Category block
   catBlock: {
     backgroundColor: C.card, borderRadius: 12, marginBottom: 10,
     borderWidth: 1, borderColor: C.border, overflow: 'hidden',
@@ -563,7 +609,7 @@ const m = StyleSheet.create({
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: '#30363D', alignItems: 'center', justifyContent: 'center',
   },
-  divider: { height: 1, backgroundColor: C.border, marginVertical: 12 },
+  divider:    { height: 1, backgroundColor: C.border, marginVertical: 12 },
   disclaimer: { fontSize: 12, color: '#FF9500', lineHeight: 18, marginBottom: 10 },
   textScroll: { flexGrow: 0, maxHeight: 340 },
   promptText: {

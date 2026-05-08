@@ -14,7 +14,7 @@ export type SubItem = {
   isActive: boolean;
 };
 
-type PendingEntry = { categoryName: string; subItem: SubItem };
+type PendingEntry = { categoryName: string; subItem: SubItem; sourceUrl?: string; platform?: string };
 
 type CategoriesCtx = {
   categories: string[];
@@ -22,7 +22,7 @@ type CategoriesCtx = {
   addCategory: (name: string) => void;
   renameCategory: (oldName: string, newName: string) => void;
   removeCategory: (name: string) => void;
-  addPendingItem: (categoryName: string, subItem: SubItem) => void;
+  addPendingItem: (categoryName: string, subItem: SubItem, sourceUrl?: string, platform?: string) => void;
   consumePendingItems: () => PendingEntry[];
 };
 
@@ -81,8 +81,8 @@ export function CategoriesProvider({ children }: { children: React.ReactNode }) 
     });
   }
 
-  function addPendingItem(categoryName: string, subItem: SubItem) {
-    pendingRef.current = [...pendingRef.current, { categoryName, subItem }];
+  function addPendingItem(categoryName: string, subItem: SubItem, sourceUrl?: string, platform?: string) {
+    pendingRef.current = [...pendingRef.current, { categoryName, subItem, sourceUrl, platform }];
   }
 
   function consumePendingItems(): PendingEntry[] {

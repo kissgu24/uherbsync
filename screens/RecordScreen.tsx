@@ -12,8 +12,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { loadOrders, deleteOrder, OrderRecord } from '../db/db';
+import { loadOrders, deleteOrder, updateOrderOverseas, OrderRecord } from '../db/db';
 import { buildRestockUrl } from '../constants/affiliate';
+import { i18n } from '../i18n';
+import { useLanguage } from '../contexts/LanguageContext';
+import { formatCurrency } from '../utils/currency';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
@@ -44,10 +47,6 @@ function formatDate(iso: string): string {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function formatNTD(n: number) {
-  return `NT$${n.toLocaleString()}`;
-}
-
 function halfYearKey(date: string): string {
   const d = new Date(date);
   return `${d.getFullYear()}-${d.getMonth() < 6 ? 'H1' : 'H2'}`;
@@ -55,7 +54,7 @@ function halfYearKey(date: string): string {
 
 function halfYearLabel(key: string): string {
   const [year, half] = key.split('-');
-  return `${year} ${half === 'H1' ? '上半年' : '下半年'}`;
+  return `${year} ${half === 'H1' ? i18n.t('record.firstHalf') : i18n.t('record.secondHalf')}`;
 }
 
 function groupOrders(orders: OrderRecord[]): HalfYearGroup[] {
@@ -79,6 +78,7 @@ type ItemRowProps = {
 };
 
 function ItemRow({ item, isLast }: ItemRowProps) {
+  const { language } = useLanguage();
   const brand = item.brand || item.productName;
   const spec = (item.spec && item.spec !== item.brand) ? item.spec : '';
   return (
@@ -86,14 +86,17 @@ function ItemRow({ item, isLast }: ItemRowProps) {
       <Text style={d.colCat} numberOfLines={1}>{item.categoryName || '—'}</Text>
       <TouchableOpacity
         style={d.colBrand}
-        onPress={() => Linking.openURL(buildRestockUrl('', `${brand} ${spec}`.trim()))}
+        onPress={() => {
+          const url = buildRestockUrl('', `${brand} ${spec}`.trim());
+          Linking.openURL(url);
+        }}
         activeOpacity={0.7}
       >
         <Text style={d.brandTxt} numberOfLines={1}>{brand}</Text>
         {!!spec && <Text style={d.specTxt} numberOfLines={1}>{spec}</Text>}
       </TouchableOpacity>
       <Text style={d.colQty}>×{item.qty}</Text>
-      <Text style={d.colAmt}>{formatNTD(item.amount)}</Text>
+      <Text style={d.colAmt}>{formatCurrency(item.amount, language)}</Text>
     </View>
   );
 }
@@ -105,9 +108,11 @@ type OrderRowProps = {
   expanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onToggleOverseas: () => void;
 };
 
-function OrderRow({ order, expanded, onToggle, onDelete }: OrderRowProps) {
+function OrderRow({ order, expanded, onToggle, onDelete, onToggleOverseas }: OrderRowProps) {
+  const { language } = useLanguage();
   return (
     <View style={[o.card, expanded && o.cardExpanded]}>
 
@@ -118,8 +123,19 @@ function OrderRow({ order, expanded, onToggle, onDelete }: OrderRowProps) {
           <View style={o.tagRow}>
             <View style={o.tag}>
               <Ionicons name="person-outline" size={10} color={C.textSecondary} />
-              <Text style={o.tagTxt}>本人</Text>
+              <Text style={o.tagTxt}>{i18n.t('record.personTag')}</Text>
             </View>
+            <TouchableOpacity
+              style={[o.tag, order.isOverseas && o.tagOverseas]}
+              onPress={onToggleOverseas}
+              hitSlop={6}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="airplane-outline" size={10} color={order.isOverseas ? '#F0A500' : C.textSecondary} />
+              <Text style={[o.tagTxt, order.isOverseas && { color: '#F0A500' }]}>
+                {i18n.t('record.overseas')}
+              </Text>
+            </TouchableOpacity>
             {!!order.discountCode && (
               <View style={[o.tag, o.tagAccent]}>
                 <Ionicons name="pricetag-outline" size={10} color={C.accent} />
@@ -129,7 +145,7 @@ function OrderRow({ order, expanded, onToggle, onDelete }: OrderRowProps) {
           </View>
         </TouchableOpacity>
 
-        <Text style={o.amt}>{formatNTD(order.totalAmount)}</Text>
+        <Text style={o.amt}>{formatCurrency(order.totalAmount, language)}</Text>
 
         <TouchableOpacity style={o.iconBtn} onPress={onDelete} hitSlop={8} activeOpacity={0.7}>
           <Ionicons name="trash-outline" size={15} color={C.textSecondary} />
@@ -149,12 +165,12 @@ function OrderRow({ order, expanded, onToggle, onDelete }: OrderRowProps) {
         <View style={d.list}>
           {/* Column headers */}
           <View style={[d.row, d.headerRow]}>
-            <Text style={[d.colCat, d.hdrTxt]}>大類</Text>
+            <Text style={[d.colCat, d.hdrTxt]}>{i18n.t('record.colCategory')}</Text>
             <View style={d.colBrand}>
-              <Text style={d.hdrTxt}>品牌 / 規格</Text>
+              <Text style={d.hdrTxt}>{i18n.t('record.colBrandSpec')}</Text>
             </View>
-            <Text style={[d.colQty, d.hdrTxt]}>數量</Text>
-            <Text style={[d.colAmt, d.hdrTxt]}>金額</Text>
+            <Text style={[d.colQty, d.hdrTxt]}>{i18n.t('record.colQty')}</Text>
+            <Text style={[d.colAmt, d.hdrTxt]}>{i18n.t('record.colAmount')}</Text>
           </View>
 
           {order.items.map((item, idx) => (
@@ -179,12 +195,14 @@ type GroupRowProps = {
   onToggleGroup: () => void;
   onToggleOrder: (id: string) => void;
   onDeleteOrder: (order: OrderRecord) => void;
+  onToggleOverseas: (order: OrderRecord) => void;
 };
 
 function GroupRow({
   group, groupExpanded, expandedOrders,
-  onToggleGroup, onToggleOrder, onDeleteOrder,
+  onToggleGroup, onToggleOrder, onDeleteOrder, onToggleOverseas,
 }: GroupRowProps) {
+  const { language } = useLanguage();
   const totalAmount = group.orders.reduce((s, o) => s + o.totalAmount, 0);
 
   return (
@@ -193,7 +211,7 @@ function GroupRow({
       <TouchableOpacity style={g.header} onPress={onToggleGroup} activeOpacity={0.75}>
         <View style={g.left}>
           <Text style={g.label}>{group.label}</Text>
-          <Text style={g.meta}>{group.orders.length} 筆・{formatNTD(totalAmount)}</Text>
+          <Text style={g.meta}>{i18n.t('record.ordersMeta', { count: group.orders.length, amount: formatCurrency(totalAmount, language) })}</Text>
         </View>
         <Ionicons
           name={groupExpanded ? 'chevron-up' : 'chevron-down'}
@@ -212,6 +230,7 @@ function GroupRow({
                 expanded={expandedOrders.has(order.id)}
                 onToggle={() => onToggleOrder(order.id)}
                 onDelete={() => onDeleteOrder(order)}
+                onToggleOverseas={() => onToggleOverseas(order)}
               />
             </View>
           ))}
@@ -224,6 +243,7 @@ function GroupRow({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function RecordScreen() {
+  const { language } = useLanguage();
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -264,14 +284,22 @@ export default function RecordScreen() {
     });
   }
 
+  async function handleToggleOverseas(order: OrderRecord) {
+    const next = !order.isOverseas;
+    try {
+      await updateOrderOverseas(order.id, next);
+      setOrders(prev => prev.map(o => o.id === order.id ? { ...o, isOverseas: next } : o));
+    } catch {}
+  }
+
   function handleDelete(order: OrderRecord) {
     Alert.alert(
-      '刪除訂單',
-      '確定移除這筆訂單？此操作無法復原。',
+      i18n.t('record.deleteTitle'),
+      i18n.t('record.deleteMsg'),
       [
-        { text: '取消', style: 'cancel' },
+        { text: i18n.t('common.cancel'), style: 'cancel' },
         {
-          text: '確認刪除',
+          text: i18n.t('common.confirmDelete'),
           style: 'destructive',
           onPress: async () => {
             try {
@@ -283,7 +311,7 @@ export default function RecordScreen() {
                 return next;
               });
             } catch {
-              Alert.alert('錯誤', '刪除失敗，請再試一次。');
+              Alert.alert(i18n.t('common.error'), i18n.t('record.deleteError'));
             }
           },
         },
@@ -308,14 +336,14 @@ export default function RecordScreen() {
         contentContainerStyle={s.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={s.title}>歷史記錄</Text>
+        <Text style={s.title}>{i18n.t('record.title')}</Text>
 
         {/* ── Grouped List ── */}
         {groups.length === 0 ? (
           <View style={s.empty}>
             <Ionicons name="document-text-outline" size={44} color={C.border} />
-            <Text style={s.emptyText}>尚無記錄</Text>
-            <Text style={s.emptyHint}>從「登錄」分頁確定登錄後，記錄將顯示於此</Text>
+            <Text style={s.emptyText}>{i18n.t('record.empty')}</Text>
+            <Text style={s.emptyHint}>{i18n.t('record.emptyHint')}</Text>
           </View>
         ) : (
           groups.map(group => (
@@ -327,6 +355,7 @@ export default function RecordScreen() {
               onToggleGroup={() => toggleGroup(group.key)}
               onToggleOrder={toggleOrder}
               onDeleteOrder={handleDelete}
+              onToggleOverseas={handleToggleOverseas}
             />
           ))
         )}
@@ -386,7 +415,8 @@ const o = StyleSheet.create({
     paddingHorizontal: 6, paddingVertical: 2,
     borderWidth: 1, borderColor: C.border,
   },
-  tagAccent: { borderColor: C.accent + '44', backgroundColor: C.accent + '12' },
+  tagAccent:   { borderColor: C.accent + '44', backgroundColor: C.accent + '12' },
+  tagOverseas: { borderColor: '#F0A50044', backgroundColor: '#F0A50012' },
   tagTxt:    { fontSize: 10, color: C.textSecondary, fontWeight: '500' },
 
   amt:     { fontSize: 14, fontWeight: '800', color: C.accent, marginRight: 4 },

@@ -1,11 +1,13 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, Switch, StyleSheet, ScrollView, Alert } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Switch, StyleSheet, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
-import { getSetting, setSetting } from '../db/db';
+import { getSetting, setSetting, runDailyDeductionIfNeeded } from '../db/db';
+import { i18n } from '../i18n';
+import { useLanguage } from '../contexts/LanguageContext';
 
-import { COUNTRY_OPTIONS, CountryCode } from '../constants/countryRules';
+import { COUNTRY_OPTIONS, COUNTRY_RULES, CountryCode } from '../constants/countryRules';
 import { RestockPlatform } from '../constants/affiliate';
 
 const PLATFORM_OPTIONS: { key: RestockPlatform; emoji: string; label: string }[] = [
@@ -29,17 +31,29 @@ const C = {
 const appVersion = Constants.expoConfig?.version ?? '1.0.0';
 
 export default function SettingsScreen() {
+  const { language, setLanguage } = useLanguage();
   const [country, setCountry] = useState<CountryCode>('TW');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [sortPreference, setSortPreference] = useState<'days' | 'custom'>('days');
   const [defaultRestockPlatform, setDefaultRestockPlatform] = useState<RestockPlatform>('iherb');
+  const [showBeginnerGuide, setShowBeginnerGuide] = useState(true);
+  const [taxThresholdInput, setTaxThresholdInput] = useState('');
+  const [shippingThresholdInput, setShippingThresholdInput] = useState('');
 
   useFocusEffect(
     useCallback(() => {
-      getSetting('country').then(val => {
-        if (val === 'TW' || val === 'JP' || val === 'KR' || val === 'OFF') {
-          setCountry(val);
-        }
+      Promise.all([
+        getSetting('country'),
+        getSetting('tax_threshold_override'),
+        getSetting('free_shipping_threshold_override'),
+      ]).then(([countryVal, taxOv, shipOv]) => {
+        const c: CountryCode =
+          (countryVal === 'TW' || countryVal === 'JP' || countryVal === 'KR' || countryVal === 'OFF')
+            ? countryVal : 'TW';
+        setCountry(c);
+        const rule = COUNTRY_RULES[c];
+        setTaxThresholdInput(taxOv && taxOv !== '' ? taxOv : String(rule.taxFreePerOrder));
+        setShippingThresholdInput(shipOv && shipOv !== '' ? shipOv : String(rule.freeShipping));
       }).catch(() => {});
       getSetting('notifications_enabled').then(val => {
         setNotificationsEnabled(val !== 'false');
@@ -52,20 +66,42 @@ export default function SettingsScreen() {
           setDefaultRestockPlatform(val);
         }
       }).catch(() => {});
+      getSetting('show_beginner_guide').then(val => {
+        setShowBeginnerGuide(val !== '0');
+      }).catch(() => {});
     }, [])
   );
 
   async function selectCountry(code: CountryCode) {
     setCountry(code);
     await setSetting('country', code);
+    const [taxOv, shipOv] = await Promise.all([
+      getSetting('tax_threshold_override'),
+      getSetting('free_shipping_threshold_override'),
+    ]);
+    const rule = COUNTRY_RULES[code];
+    setTaxThresholdInput(taxOv && taxOv !== '' ? taxOv : String(rule.taxFreePerOrder));
+    setShippingThresholdInput(shipOv && shipOv !== '' ? shipOv : String(rule.freeShipping));
+  }
+
+  async function handleTaxThresholdChange(val: string) {
+    const clean = val.replace(/[^0-9.]/g, '');
+    setTaxThresholdInput(clean);
+    await setSetting('tax_threshold_override', clean);
+  }
+
+  async function handleShippingThresholdChange(val: string) {
+    const clean = val.replace(/[^0-9.]/g, '');
+    setShippingThresholdInput(clean);
+    await setSetting('free_shipping_threshold_override', clean);
   }
 
   async function toggleNotifications(value: boolean) {
     if (isExpoGo && value) {
       Alert.alert(
-        '推播通知',
-        '推播通知需要安裝正式版 App 才能使用',
-        [{ text: '了解', style: 'default' }]
+        i18n.t('settings.expoGoAlertTitle'),
+        i18n.t('settings.expoGoAlertMsg'),
+        [{ text: i18n.t('common.ok'), style: 'default' }]
       );
       return;
     }
@@ -83,13 +119,29 @@ export default function SettingsScreen() {
     await setSetting('default_restock_platform', platform);
   }
 
+  async function toggleBeginnerGuide(value: boolean) {
+    setShowBeginnerGuide(value);
+    await setSetting('show_beginner_guide', value ? '1' : '0');
+  }
+
+  async function handleSimulateDeduction() {
+    try {
+      await setSetting('last_deduct_date', '');
+      await runDailyDeductionIfNeeded();
+      Alert.alert('已扣除，請切換至首頁確認');
+    } catch (e) {
+      console.error('simulate deduction error', e);
+      Alert.alert('扣除失敗，請查看 console');
+    }
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <ScrollView style={s.scroll} showsVerticalScrollIndicator={false}>
-        <Text style={s.title}>設定</Text>
+        <Text style={s.title}>{i18n.t('settings.title')}</Text>
 
         <View style={s.section}>
-          <Text style={s.sectionLabel}>免稅追蹤地區</Text>
+          <Text style={s.sectionLabel}>{i18n.t('settings.taxRegion')}</Text>
           <View style={s.btnGrid}>
             {COUNTRY_OPTIONS.map(opt => {
               const isActive = country === opt.code;
@@ -102,20 +154,59 @@ export default function SettingsScreen() {
                 >
                   <Text style={s.flag}>{opt.flag}</Text>
                   <Text style={[s.countryLabel, isActive && s.countryLabelActive]}>
-                    {opt.label}
+                    {i18n.t(`settings.country_${opt.code}`)}
                   </Text>
                 </TouchableOpacity>
               );
             })}
           </View>
+          {country !== 'OFF' && (() => {
+            const rule = COUNTRY_RULES[country];
+            return (
+              <View style={s.thresholdEditArea}>
+                {rule.taxFreePerOrder > 0 && (
+                  <View style={s.thresholdEditRow}>
+                    <Text style={s.thresholdLabel}>{i18n.t('settings.tax_threshold')}</Text>
+                    <View style={s.thresholdInputWrap}>
+                      <Text style={s.thresholdCurrency}>{rule.currency}</Text>
+                      <TextInput
+                        style={s.thresholdInput}
+                        value={taxThresholdInput}
+                        onChangeText={handleTaxThresholdChange}
+                        keyboardType="numeric"
+                        placeholderTextColor={C.textSecondary}
+                        selectionColor={C.accent}
+                      />
+                    </View>
+                  </View>
+                )}
+                {rule.freeShipping > 0 && (
+                  <View style={[s.thresholdEditRow, { marginTop: 8 }]}>
+                    <Text style={s.thresholdLabel}>{i18n.t('settings.free_shipping_threshold')}</Text>
+                    <View style={s.thresholdInputWrap}>
+                      <Text style={s.thresholdCurrency}>{rule.currency}</Text>
+                      <TextInput
+                        style={s.thresholdInput}
+                        value={shippingThresholdInput}
+                        onChangeText={handleShippingThresholdChange}
+                        keyboardType="numeric"
+                        placeholderTextColor={C.textSecondary}
+                        selectionColor={C.accent}
+                      />
+                    </View>
+                  </View>
+                )}
+              </View>
+            );
+          })()}
         </View>
 
         <View style={[s.section, s.sectionTop]}>
-          <Text style={s.sectionLabel}>推播通知</Text>
+          <Text style={s.sectionLabel}>{i18n.t('settings.notifications')}</Text>
           <View style={s.notifRow}>
             <View style={s.notifLeft}>
-              <Text style={s.notifTitle}>庫存不足提醒</Text>
-              <Text style={s.notifHint}>庫存低於14天時，開啟 App 會收到提醒</Text>
+              <Text style={s.notifTitle}>{i18n.t('settings.lowStockAlert')}</Text>
+              <Text style={s.notifHint}>{i18n.t('settings.lowStockHint')}</Text>
             </View>
             <Switch
               value={notificationsEnabled}
@@ -124,10 +215,19 @@ export default function SettingsScreen() {
               thumbColor={notificationsEnabled ? C.accent : '#8B949E'}
             />
           </View>
+          <View style={[s.notifRow, { marginTop: 14 }]}>
+            <Text style={s.notifTitle}>{i18n.t('common.beginner_guide')}</Text>
+            <Switch
+              value={showBeginnerGuide}
+              onValueChange={toggleBeginnerGuide}
+              trackColor={{ false: C.border, true: C.accent + '88' }}
+              thumbColor={showBeginnerGuide ? C.accent : '#8B949E'}
+            />
+          </View>
         </View>
 
         <View style={[s.section, s.sectionTop]}>
-          <Text style={s.sectionLabel}>首頁排序</Text>
+          <Text style={s.sectionLabel}>{i18n.t('settings.sortTitle')}</Text>
 
           <TouchableOpacity
             style={[s.sortOption, sortPreference === 'days' && s.sortOptionActive]}
@@ -138,8 +238,8 @@ export default function SettingsScreen() {
               {sortPreference === 'days' && <View style={s.sortRadioDot} />}
             </View>
             <View style={s.sortTextGroup}>
-              <Text style={[s.sortLabel, sortPreference === 'days' && s.sortLabelActive]}>剩餘天數</Text>
-              <Text style={s.sortHint}>依剩餘天數由少到多排列</Text>
+              <Text style={[s.sortLabel, sortPreference === 'days' && s.sortLabelActive]}>{i18n.t('settings.sortDays')}</Text>
+              <Text style={s.sortHint}>{i18n.t('settings.sortDaysHint')}</Text>
             </View>
           </TouchableOpacity>
 
@@ -147,18 +247,18 @@ export default function SettingsScreen() {
             <View style={s.sortRadio} />
             <View style={s.sortTextGroup}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={[s.sortLabel, s.sortLabelDisabled]}>自訂順序</Text>
+                <Text style={[s.sortLabel, s.sortLabelDisabled]}>{i18n.t('settings.sortCustom')}</Text>
                 <View style={s.comingSoonBadge}>
-                  <Text style={s.comingSoonText}>即將推出</Text>
+                  <Text style={s.comingSoonText}>{i18n.t('settings.comingSoon')}</Text>
                 </View>
               </View>
-              <Text style={s.sortHint}>依用戶拖曳順序排列</Text>
+              <Text style={s.sortHint}>{i18n.t('settings.sortCustomHint')}</Text>
             </View>
           </View>
         </View>
 
         <View style={[s.section, s.sectionTop]}>
-          <Text style={s.sectionLabel}>預設補貨平台</Text>
+          <Text style={s.sectionLabel}>{i18n.t('settings.restockPlatform')}</Text>
           <View style={s.btnGrid}>
             {PLATFORM_OPTIONS.map(opt => {
               const isActive = defaultRestockPlatform === opt.key;
@@ -179,9 +279,44 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        <View style={[s.section, s.sectionTop]}>
+          <Text style={s.sectionLabel}>{i18n.t('settings.language')}</Text>
+          <View style={s.btnGrid}>
+            <TouchableOpacity
+              style={[s.countryBtn, language === 'zh' && s.countryBtnActive]}
+              onPress={() => setLanguage('zh')}
+              activeOpacity={0.75}
+            >
+              <Text style={s.flag}>🇹🇼</Text>
+              <Text style={[s.countryLabel, language === 'zh' && s.countryLabelActive]}>中文</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.countryBtn, language === 'en' && s.countryBtnActive]}
+              onPress={() => setLanguage('en')}
+              activeOpacity={0.75}
+            >
+              <Text style={s.flag}>🇺🇸</Text>
+              <Text style={[s.countryLabel, language === 'en' && s.countryLabelActive]}>English</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {__DEV__ && (
+          <View style={[s.section, s.sectionTop]}>
+            <Text style={s.sectionLabel}>開發測試</Text>
+            <TouchableOpacity
+              style={s.devTestBtn}
+              onPress={handleSimulateDeduction}
+              activeOpacity={0.75}
+            >
+              <Text style={s.devTestBtnText}>🧪 模擬每日扣除</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={s.versionContainer}>
           <Text style={s.versionText}>uHerbSync</Text>
-          <Text style={s.versionText}>版本 {appVersion}</Text>
+          <Text style={s.versionText}>{i18n.t('settings.version', { version: appVersion })}</Text>
         </View>
 
         <View style={{ height: 24 }} />
@@ -217,6 +352,18 @@ const s = StyleSheet.create({
   flag:         { fontSize: 24, marginBottom: 6 },
   countryLabel: { fontSize: 13, fontWeight: '600', color: C.textSecondary },
   countryLabelActive: { color: C.accent },
+
+  thresholdEditArea: { marginTop: 12 },
+  thresholdEditRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  thresholdLabel: { fontSize: 12, color: C.textSecondary, flex: 1 },
+  thresholdInputWrap: {
+    flexDirection: 'row', alignItems: 'center',
+    borderWidth: 1, borderColor: C.border, borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 5,
+    backgroundColor: '#1C2128',
+  },
+  thresholdCurrency: { fontSize: 13, color: C.textSecondary, marginRight: 4 },
+  thresholdInput: { fontSize: 14, color: C.textPrimary, minWidth: 72, textAlign: 'right' },
 
   notifRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   notifLeft: { flex: 1, marginRight: 12 },
@@ -256,6 +403,20 @@ const s = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 2,
   },
   comingSoonText: { fontSize: 10, fontWeight: '700', color: C.textSecondary, letterSpacing: 0.5 },
+
+  devTestBtn: {
+    borderWidth: 1.5,
+    borderColor: '#FF9500',
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+  },
+  devTestBtnText: {
+    color: '#FF9500',
+    fontSize: 15,
+    fontWeight: '600',
+  },
 
   versionContainer: { marginTop: 32, alignItems: 'center', gap: 4 },
   versionText: { fontSize: 12, color: C.textSecondary, opacity: 0.6 },

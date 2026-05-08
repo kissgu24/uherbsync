@@ -8,6 +8,8 @@ import {
   TextInput,
   Modal,
   Pressable,
+  Switch,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +17,10 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useCategories, SubItem } from '../contexts/CategoriesContext';
 import { appendOrder, OrderRecord, getSetting } from '../db/db';
 import { COUNTRY_RULES, CountryCode } from '../constants/countryRules';
+import { i18n } from '../i18n';
+import { useLanguage } from '../contexts/LanguageContext';
+import { formatCurrency, formatThreshold } from '../utils/currency';
+import { parseNewPlatformUrl } from '../utils/urlParser';
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
@@ -36,9 +42,9 @@ type ParsedInfo = {
   productName: string;
   brand: string;
   spec: string;
-  bottleSize: number;
+  bottleSize: number | null;
   productId: string;
-  platform: 'iherb' | 'amazon' | 'vitacost' | 'swanson';
+  platform: 'iherb' | 'amazon' | 'vitacost' | 'swanson' | 'momo' | 'costco' | 'shopee' | 'coupang';
 };
 
 function parseIHerbUrl(url: string): ParsedInfo | null {
@@ -142,29 +148,52 @@ function parseSwansonUrl(url: string): ParsedInfo | null {
 }
 
 function parseAmazonUrl(url: string): ParsedInfo | null {
-  // Extract ASIN from /dp/[ASIN] or /gp/product/[ASIN]
-  const asinMatch = url.trim().match(/(?:\/dp\/|\/gp\/product\/)([A-Z0-9]{10})/i);
+  const trimmedUrl = url.trim();
+
+  const asinMatch = trimmedUrl.match(/\/dp\/([A-Z0-9]{10})/);
   if (!asinMatch) return null;
 
   const productId = asinMatch[1].toUpperCase();
-
-  // Try to extract title from the URL slug that appears before /dp/
-  const slugMatch = url.trim().match(/amazon\.[^/]+\/([^/?]+)\/(?:dp|gp\/product)\/[A-Z0-9]{10}/i);
+  const capitalize = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
   let brand = '';
   let spec = '';
-  if (slugMatch && slugMatch[1] !== 'dp') {
-    const capitalize = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
-    const words = decodeURIComponent(slugMatch[1]).replace(/[-_+]/g, ' ').split(/\s+/).filter(Boolean);
-    const firstNumIdx = words.findIndex(w => /^\d+$/.test(w));
-    if (firstNumIdx <= 0) {
-      spec = words.map(capitalize).join(' ');
-    } else {
-      brand = words.slice(0, firstNumIdx).map(capitalize).join(' ');
-      spec  = words.slice(firstNumIdx).map(capitalize).join(' ');
+
+  // Priority 1: slug segment immediately before /dp/
+  // Skip locale codes (e.g. zh_TW, en_US) and segments <= 2 chars (e.g. '-')
+  const slugMatch = trimmedUrl.match(/\/([^/?]+)\/dp\/[A-Z0-9]{10}/i);
+  if (slugMatch) {
+    const rawSlug = slugMatch[1];
+    const isLocaleOrShort = /^[a-z]{2}[-_][a-z]{2}$/i.test(rawSlug) || rawSlug.length <= 2;
+    if (!isLocaleOrShort) {
+      const decoded = decodeURIComponent(rawSlug).replace(/[-_+]/g, ' ');
+      const words = decoded.split(/\s+/).filter(w => /^[a-zA-Z0-9]+$/.test(w));
+      if (words.length > 0) {
+        const firstNumIdx = words.findIndex(w => /^\d+$/.test(w));
+        if (firstNumIdx <= 0) {
+          spec = words.map(capitalize).join(' ');
+        } else {
+          brand = words.slice(0, firstNumIdx).map(capitalize).join(' ');
+          spec  = words.slice(firstNumIdx).map(capitalize).join(' ');
+        }
+      }
     }
   }
 
-  const productName = brand ? `${brand} - ${spec}` : (spec || `Amazon ${productId}`);
+  // Priority 2: keywords/k query param only — no other params
+  if (!spec) {
+    try {
+      const urlObj = new URL(trimmedUrl);
+      const keyword = urlObj.searchParams.get('keywords') || urlObj.searchParams.get('k');
+      if (keyword?.trim()) spec = keyword.trim();
+    } catch {}
+  }
+
+  // No name found — return with empty brand/spec so user fills in manually
+  if (!spec) {
+    return { productName: '', brand: '', spec: '', bottleSize: null, productId, platform: 'amazon' };
+  }
+
+  const productName = brand ? `${brand} - ${spec}` : spec;
   return { productName, brand, spec, bottleSize: 0, productId, platform: 'amazon' };
 }
 
@@ -176,6 +205,7 @@ type EntryRow = {
   customCategory: string;
   link: string;
   parsed: ParsedInfo | null;
+  linkBlurred: boolean;
   brandInput: string;
   specInput: string;
   totalPills: string;
@@ -191,6 +221,7 @@ function newRow(): EntryRow {
     customCategory: '',
     link: '',
     parsed: null,
+    linkBlurred: false,
     brandInput: '',
     specInput: '',
     totalPills: '',
@@ -198,10 +229,6 @@ function newRow(): EntryRow {
     qty: '1',
     unitPrice: '',
   };
-}
-
-function formatCurrency(n: number, currency: string) {
-  return `${currency}${n.toLocaleString()}`;
 }
 
 // ─── Category Picker Modal ────────────────────────────────────────────────────
@@ -218,7 +245,7 @@ function CategoryPickerModal({ categories, current, onSelect, onClose }: Categor
     <Modal transparent animationType="fade" visible onRequestClose={onClose}>
       <Pressable style={ps.overlay} onPress={onClose}>
         <Pressable style={ps.card} onPress={() => {}}>
-          <Text style={ps.title}>選擇大類</Text>
+          <Text style={ps.title}>{i18n.t('replenish.pickerTitle')}</Text>
           <View style={ps.divider} />
           {categories.map((cat, i) => {
             const isActive = cat === current;
@@ -230,14 +257,16 @@ function CategoryPickerModal({ categories, current, onSelect, onClose }: Categor
                 onPress={() => { onSelect(cat); onClose(); }}
                 activeOpacity={0.65}
               >
-                <Text style={[ps.optText, isActive && ps.optTextActive]}>{cat}</Text>
+                <Text style={[ps.optText, isActive && ps.optTextActive]}>
+                  {cat === '其他' ? i18n.t('replenish.category_other') : cat}
+                </Text>
                 {isActive && <Ionicons name="checkmark-circle" size={18} color={C.accent} />}
               </TouchableOpacity>
             );
           })}
           <View style={ps.divider} />
           <TouchableOpacity style={ps.cancelBtn} onPress={onClose} activeOpacity={0.7}>
-            <Text style={ps.cancelText}>取消</Text>
+            <Text style={ps.cancelText}>{i18n.t('common.cancel')}</Text>
           </TouchableOpacity>
         </Pressable>
       </Pressable>
@@ -248,21 +277,49 @@ function CategoryPickerModal({ categories, current, onSelect, onClose }: Categor
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ReplenishScreen() {
+  const { language } = useLanguage();
   const { categories, addCategory, addPendingItem } = useCategories();
 
   const [rows, setRows] = useState<EntryRow[]>([newRow()]);
-  const [discountCode, setDiscountCode] = useState('');
+  const [isOverseas, setIsOverseas] = useState(false);
+  const [parsingRowIds, setParsingRowIds] = useState<Set<string>>(new Set());
   const [pickerRowId, setPickerRowId] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [country, setCountry] = useState<CountryCode>('TW');
+  const [activeTaxThreshold, setActiveTaxThreshold] = useState(COUNTRY_RULES['TW'].taxFreePerOrder);
+  const [activeShippingThreshold, setActiveShippingThreshold] = useState(COUNTRY_RULES['TW'].freeShipping);
 
   useFocusEffect(
     useCallback(() => {
-      getSetting('country')
-        .then(val => {
-          if (val === 'TW' || val === 'JP' || val === 'KR' || val === 'OFF') {
-            setCountry(val);
+      Promise.all([
+        getSetting('country'),
+        getSetting('tax_threshold_override'),
+        getSetting('free_shipping_threshold_override'),
+      ])
+        .then(([countryVal, taxOv, shipOv]) => {
+          const c: CountryCode =
+            countryVal === 'TW' || countryVal === 'JP' || countryVal === 'KR' || countryVal === 'OFF'
+              ? countryVal
+              : 'TW';
+          setCountry(c);
+
+          if (c === 'OFF') {
+            setActiveTaxThreshold(0);
+            setActiveShippingThreshold(0);
+            return;
           }
+
+          const r = COUNTRY_RULES[c];
+
+          const parsedTaxOv = taxOv ? parseFloat(taxOv) : NaN;
+          setActiveTaxThreshold(
+            Number.isFinite(parsedTaxOv) && parsedTaxOv > 0 ? parsedTaxOv : r.taxFreePerOrder
+          );
+
+          const parsedShipOv = shipOv ? parseFloat(shipOv) : NaN;
+          setActiveShippingThreshold(
+            Number.isFinite(parsedShipOv) && parsedShipOv > 0 ? parsedShipOv : r.freeShipping
+          );
         })
         .catch(() => {});
     }, [])
@@ -275,7 +332,7 @@ export default function ReplenishScreen() {
     const qty = parseInt(r.qty, 10) || 1;
     return sum + (isNaN(price) ? 0 : price * qty);
   }, 0);
-  const overBudget = country !== 'OFF' && rule.taxFreePerOrder > 0 && total > rule.taxFreePerOrder;
+  const overBudget = country !== 'OFF' && activeTaxThreshold > 0 && total > activeTaxThreshold;
 
   // ── Row helpers ──────────────────────────────────────────────────────────
 
@@ -304,9 +361,10 @@ export default function ReplenishScreen() {
         ...r,
         link: text,
         parsed,
+        linkBlurred: false,
         brandInput: parsed ? parsed.brand : r.brandInput,
         specInput: parsed ? parsed.spec : r.specInput,
-        totalPills: parsed ? String(parsed.bottleSize * qty) : r.totalPills,
+        totalPills: parsed ? String((parsed.bottleSize ?? 0) * qty) : r.totalPills,
         pillsManuallyEdited: false,
       };
     }));
@@ -325,10 +383,54 @@ export default function ReplenishScreen() {
       if (r.id !== rowId) return r;
       if (r.parsed && !r.pillsManuallyEdited) {
         const qty = parseInt(digits, 10) || 1;
-        return { ...r, qty: digits, totalPills: String(r.parsed.bottleSize * qty) };
+        return { ...r, qty: digits, totalPills: String((r.parsed.bottleSize ?? 0) * qty) };
       }
       return { ...r, qty: digits };
     }));
+  }
+
+  async function handleLinkBlur(rowId: string) {
+    const row = rows.find(r => r.id === rowId);
+    if (!row || !row.link.trim() || row.parsed) return;
+
+    setParsingRowIds(prev => new Set([...prev, rowId]));
+    try {
+      const result = await parseNewPlatformUrl(row.link.trim());
+      if (!result) return;
+
+      const parsed: ParsedInfo = {
+        productName: result.productName,
+        brand:       result.brand,
+        spec:        result.spec,
+        bottleSize:  result.bottleSize,
+        productId:   result.productId,
+        platform:    result.platform,
+      };
+
+      setRows(prev => prev.map(r => {
+        if (r.id !== rowId) return r;
+        const qty = parseInt(r.qty, 10) || 1;
+        return {
+          ...r,
+          link:               result.normalizedUrl || r.link,
+          parsed,
+          linkBlurred:        true,
+          brandInput:         r.brandInput || result.brand,
+          specInput:          r.specInput  || result.spec,
+          totalPills:         r.totalPills || (result.bottleSize ? String(result.bottleSize * qty) : ''),
+          pillsManuallyEdited: false,
+        };
+      }));
+    } catch {
+      // silent failure — no blocking error
+    } finally {
+      setParsingRowIds(prev => {
+        const next = new Set(prev);
+        next.delete(rowId);
+        return next;
+      });
+      setRows(prev => prev.map(r => r.id === rowId ? { ...r, linkBlurred: true } : r));
+    }
   }
 
   function addRow() {
@@ -351,36 +453,41 @@ export default function ReplenishScreen() {
     rows.forEach(r => {
       const categoryName = r.category === '其他' ? r.customCategory.trim() : r.category;
       if (!categoryName) return;
-      if (!r.brandInput && !r.specInput) return;
+      const brand = r.brandInput.trim() || 'NA';
+      const spec  = r.specInput.trim()  || 'NA';
       const newSubItem: SubItem = {
         id: `sub_${Date.now()}_${r.id}`,
-        brand: r.brandInput,
-        spec: r.specInput,
+        brand,
+        spec,
         remaining: parseInt(r.totalPills, 10) || 0,
         bottleSize: r.parsed?.bottleSize ?? 0,
         doseUnit: '顆',
-        iherbUrl: r.link,
+        iherbUrl: '',
+        isActive: true,
       };
-      addPendingItem(categoryName, newSubItem);
+      addPendingItem(categoryName, newSubItem, r.link || undefined, r.parsed?.platform);
     });
 
     // 3. Append order record to AsyncStorage history
     const record: OrderRecord = {
       id: `order_${Date.now()}`,
       date: new Date().toISOString(),
-      discountCode,
+      discountCode: '',
       totalAmount: total,
+      isOverseas,
       items: rows.map(r => {
         const unitPrice = parseFloat(r.unitPrice) || 0;
         const qty = parseInt(r.qty, 10) || 1;
+        const brand = r.brandInput.trim() || 'NA';
+        const spec  = r.specInput.trim()  || 'NA';
         return {
           categoryName: r.category === '其他' ? r.customCategory.trim() : r.category,
-          productName: r.parsed?.productName ?? (r.brandInput ? `${r.brandInput} - ${r.specInput}` : r.specInput),
+          productName: r.parsed?.productName || (r.brandInput.trim() ? `${brand} - ${spec}` : spec),
           qty,
           unitPrice,
           amount: unitPrice * qty,
-          brand: r.brandInput,
-          spec: r.specInput,
+          brand,
+          spec,
         };
       }),
     };
@@ -393,7 +500,7 @@ export default function ReplenishScreen() {
     setTimeout(() => {
       setConfirmed(false);
       setRows([newRow()]);
-      setDiscountCode('');
+      setIsOverseas(false);
     }, 2200);
   }
 
@@ -416,29 +523,29 @@ export default function ReplenishScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* ── Title ── */}
-        <Text style={s.title}>登錄 / 匯入</Text>
+        <Text style={s.title}>{i18n.t('replenish.title')}</Text>
 
         {/* ── Order Total Card ── */}
         <View style={[s.totalCard, overBudget && s.totalCardRed]}>
           {/* ── Status lights: top-right corner ── */}
           <View style={s.statusLights}>
-            {rule.freeShipping > 0 && (
+            {activeShippingThreshold > 0 && (
               <View style={s.statusLight}>
                 <View style={[s.statusDot, {
-                  backgroundColor: country !== 'OFF' && total >= rule.freeShipping ? '#2EA043' : '#F85149',
+                  backgroundColor: country !== 'OFF' && total >= activeShippingThreshold ? '#2EA043' : '#F85149',
                 }]} />
                 <Text style={s.statusText}>
-                  免運⬆ {rule.currency}{rule.freeShipping.toLocaleString()}
+                  {i18n.t('replenish.freeShipping', { threshold: formatThreshold(activeShippingThreshold, language, rule.currency) })}
                 </Text>
               </View>
             )}
-            {rule.taxFreePerOrder > 0 && (
+            {activeTaxThreshold > 0 && (
               <View style={s.statusLight}>
                 <View style={[s.statusDot, {
-                  backgroundColor: country !== 'OFF' && total <= rule.taxFreePerOrder ? '#2EA043' : '#F85149',
+                  backgroundColor: country !== 'OFF' && total <= activeTaxThreshold ? '#2EA043' : '#F85149',
                 }]} />
                 <Text style={s.statusText}>
-                  免稅⬇ {rule.currency}{rule.taxFreePerOrder.toLocaleString()}
+                  {i18n.t('replenish.taxFree', { threshold: formatThreshold(activeTaxThreshold, language, rule.currency) })}
                 </Text>
               </View>
             )}
@@ -448,63 +555,54 @@ export default function ReplenishScreen() {
           <View style={s.totalTopSection}>
             <View style={s.totalRow}>
               <View>
-                <Text style={s.totalLabel}>本次訂單合計</Text>
+                <Text style={s.totalLabel}>{i18n.t('replenish.orderTotal')}</Text>
                 <Text style={[s.totalAmount, overBudget && { color: C.red }]}>
-                  {total > 0 ? formatCurrency(total, rule.currency || 'NT$') : `${rule.currency || 'NT$'}0`}
+                  {formatCurrency(total, language)}
                 </Text>
               </View>
               {overBudget ? (
                 <View style={[s.pill, { borderColor: C.red + '60', backgroundColor: C.red + '18' }]}>
                   <Ionicons name="warning-outline" size={13} color={C.red} />
-                  <Text style={[s.pillText, { color: C.red }]}>超過限額</Text>
+                  <Text style={[s.pillText, { color: C.red }]}>{i18n.t('replenish.overBudget')}</Text>
                 </View>
               ) : total > 0 ? (
                 <View style={[s.pill, { borderColor: C.green + '60', backgroundColor: C.green + '18' }]}>
                   <Ionicons name="checkmark-circle-outline" size={13} color={C.green} />
-                  <Text style={[s.pillText, { color: C.green }]}>金額正常</Text>
+                  <Text style={[s.pillText, { color: C.green }]}>{i18n.t('replenish.amountOk')}</Text>
                 </View>
               ) : null}
             </View>
 
-            {rule.taxFreePerOrder > 0 && (
+            {activeTaxThreshold > 0 && (
               <>
                 <View style={s.budgetTrack}>
                   <View
                     style={[
                       s.budgetFill,
                       {
-                        width: `${Math.min((total / rule.taxFreePerOrder) * 100, 100)}%` as `${number}%`,
+                        width: `${Math.min((total / activeTaxThreshold) * 100, 100)}%` as `${number}%`,
                         backgroundColor: overBudget ? C.red : C.accent,
                       },
                     ]}
                   />
                 </View>
                 <Text style={s.budgetLabel}>
-                  {rule.currency}{rule.taxFreePerOrder.toLocaleString()} 免稅門檻
+                  {i18n.t('replenish.taxThreshold', { threshold: formatThreshold(activeTaxThreshold, language, rule.currency) })}
                 </Text>
               </>
             )}
           </View>
 
           <View style={s.divider} />
-          <Text style={s.fieldLabel}>折扣碼（整筆訂單）</Text>
-          <View style={s.inputRow}>
-            <TextInput
-              style={[s.discountInput, { flex: 1 }]}
-              value={discountCode}
-              onChangeText={t => setDiscountCode(t.toUpperCase())}
-              placeholder="輸入折扣碼（選填）"
-              placeholderTextColor={C.textSecondary}
-              autoCapitalize="characters"
-              returnKeyType="done"
+          <View style={s.overseasRow}>
+            <Text style={[s.fieldLabel, { marginBottom: 0 }]}>{i18n.t('replenish.is_overseas_package')}</Text>
+            <Switch
+              value={isOverseas}
+              onValueChange={setIsOverseas}
+              trackColor={{ false: C.border, true: C.accent + '88' }}
+              thumbColor={isOverseas ? C.accent : '#8B949E'}
+              ios_backgroundColor={C.border}
             />
-            <TouchableOpacity
-              style={s.refreshBtn}
-              onPress={() => setDiscountCode('')}
-              hitSlop={8}
-            >
-              <Ionicons name="refresh" size={18} color={C.textSecondary} />
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -513,7 +611,7 @@ export default function ReplenishScreen() {
           <View key={row.id} style={s.entryCard}>
 
             <View style={s.entryHeader}>
-              <Text style={s.entryNum}>品項 {idx + 1}</Text>
+              <Text style={s.entryNum}>{i18n.t('replenish.itemNum', { num: idx + 1 })}</Text>
               {rows.length > 1 && (
                 <TouchableOpacity onPress={() => removeRow(row.id)} hitSlop={10}>
                   <Ionicons name="close-circle-outline" size={20} color={C.textSecondary} />
@@ -524,17 +622,22 @@ export default function ReplenishScreen() {
             <View style={s.entryBody}>
 
               {/* a. Category */}
-              <Text style={s.fieldLabel}>大類</Text>
+              <Text style={s.fieldLabel}>{i18n.t('replenish.categoryLabel')}</Text>
               <TouchableOpacity
-                style={[s.dropdown, !!row.category && s.dropdownFilled]}
+                style={[s.dropdown, !!row.category && s.dropdownFilled, !row.category && s.errorBorder]}
                 onPress={() => setPickerRowId(row.id)}
                 activeOpacity={0.7}
               >
                 <Text style={[s.dropdownText, !row.category && { color: C.textSecondary }]}>
-                  {row.category || '選擇大類...'}
+                  {row.category === '其他'
+                    ? i18n.t('replenish.category_other')
+                    : row.category || i18n.t('replenish.categoryPlaceholder')}
                 </Text>
                 <Ionicons name="chevron-down" size={15} color={C.textSecondary} />
               </TouchableOpacity>
+              {!row.category && (
+                <Text style={s.errorText}>{i18n.t('replenish.error_select_category')}</Text>
+              )}
 
               {row.category === '其他' && (
                 <TextInput
@@ -542,44 +645,52 @@ export default function ReplenishScreen() {
                   value={row.customCategory}
                   onChangeText={t => updateRow(row.id, { customCategory: t })}
                   onBlur={() => commitCustomCategory(row.id, row.customCategory)}
-                  placeholder="輸入自訂名稱（自動加入下拉選單）"
+                  placeholder={i18n.t('replenish.customCategoryPlaceholder')}
                   placeholderTextColor={C.textSecondary}
                   returnKeyType="done"
                 />
               )}
 
-              {/* b. iHerb link */}
-              <Text style={[s.fieldLabel, { marginTop: 12 }]}>iHerb 商品連結</Text>
-              <Text style={s.platformHint}>✦ 支援自動解析：iHerb・Amazon・Vitacost・Swanson</Text>
+              {/* b. Product link */}
+              <Text style={[s.fieldLabel, { marginTop: 12 }]}>{i18n.t('replenish.linkLabel')}</Text>
+              <Text style={s.platformHint}>{i18n.t('replenish.import_support_full')}</Text>
+              <Text style={s.platformHint}>{i18n.t('replenish.import_support_partial')}</Text>
               <View style={s.inputRow}>
                 <TextInput
                   style={[s.input, { flex: 1, paddingRight: 36 }, row.parsed && s.inputOk]}
                   value={row.link}
                   onChangeText={t => handleLinkChange(row.id, t)}
-                  placeholder="貼入 iHerb 商品頁連結（/pr/...）"
+                  onBlur={() => handleLinkBlur(row.id)}
+                  placeholder={i18n.t('replenish.linkPlaceholder')}
                   placeholderTextColor={C.textSecondary}
                   autoCapitalize="none"
                   autoCorrect={false}
                   returnKeyType="done"
                 />
-                {row.link.length > 0 && (
+                {parsingRowIds.has(row.id) ? (
+                  <ActivityIndicator style={s.inputIconRight} size="small" color={C.accent} />
+                ) : row.link.length > 0 ? (
                   <TouchableOpacity style={s.inputIconRight} onPress={() => clearLink(row.id)} hitSlop={8}>
                     <Ionicons name="close-circle" size={17} color={C.textSecondary} />
                   </TouchableOpacity>
-                )}
+                ) : null}
               </View>
 
-              {row.link.trim() !== '' && !row.parsed && (
-                <Text style={s.linkError}>請貼入 iHerb、Amazon、Vitacost 或 Swanson 的商品頁網址</Text>
+              {row.link.trim() !== '' && !row.parsed && !parsingRowIds.has(row.id) && row.linkBlurred && (
+                <Text style={s.linkError}>{i18n.t('replenish.url_parse_error')}</Text>
               )}
 
               {/* c. Sub-category — always visible */}
-              <Text style={[s.fieldLabel, { marginTop: 12 }]}>子分類</Text>
+              <Text style={[s.fieldLabel, { marginTop: 12 }]}>{i18n.t('replenish.subCategoryLabel')}</Text>
               <TextInput
                 style={[s.input, { marginBottom: 8 }]}
                 value={row.brandInput}
                 onChangeText={t => updateRow(row.id, { brandInput: t })}
-                placeholder="品牌名稱"
+                placeholder={
+                  row.parsed && !row.brandInput
+                    ? i18n.t('replenish.brandCannotParse')
+                    : i18n.t('replenish.brandPlaceholder')
+                }
                 placeholderTextColor={C.textSecondary}
                 returnKeyType="next"
               />
@@ -587,7 +698,11 @@ export default function ReplenishScreen() {
                 style={s.input}
                 value={row.specInput}
                 onChangeText={t => updateRow(row.id, { specInput: t })}
-                placeholder="規格描述"
+                placeholder={
+                  row.parsed && !row.specInput
+                    ? i18n.t('replenish.brandCannotParse')
+                    : i18n.t('replenish.specPlaceholder')
+                }
                 placeholderTextColor={C.textSecondary}
                 returnKeyType="done"
               />
@@ -595,7 +710,7 @@ export default function ReplenishScreen() {
               {row.parsed && (
                 <>
                   <View style={s.pillsRow}>
-                    <Text style={s.pillsRowLabel}>總顆數</Text>
+                    <Text style={s.pillsRowLabel}>{i18n.t('replenish.totalPills')}</Text>
                     <View style={s.pillsCol}>
                       <TextInput
                         style={s.pillsInput}
@@ -609,13 +724,13 @@ export default function ReplenishScreen() {
                         returnKeyType="done"
                         selectTextOnFocus
                       />
-                      <Text style={s.pillsUnit}>顆</Text>
+                      <Text style={s.pillsUnit}>{i18n.t('replenish.pillsUnit')}</Text>
                     </View>
                   </View>
                   <Text style={s.subMeta}>
-                    每瓶 {row.parsed.bottleSize} 顆
-                    {row.parsed.productId ? ` · ID ${row.parsed.productId}` : ''}
-                    {row.pillsManuallyEdited ? '  · 已手動修改顆數' : ''}
+                    {row.parsed.bottleSize != null ? i18n.t('replenish.perBottle', { size: row.parsed.bottleSize }) : ''}
+                    {row.parsed.productId ? `${row.parsed.bottleSize != null ? ' · ' : ''}ID ${row.parsed.productId}` : ''}
+                    {row.pillsManuallyEdited ? `  · ${i18n.t('replenish.manuallyEdited')}` : ''}
                   </Text>
                 </>
               )}
@@ -623,7 +738,7 @@ export default function ReplenishScreen() {
               {/* d. Qty + Unit Price */}
               <View style={s.qtyAmountRow}>
                 <View style={s.qtyCol}>
-                  <Text style={[s.fieldLabel, { marginTop: 12 }]}>數量（瓶）</Text>
+                  <Text style={[s.fieldLabel, { marginTop: 12 }]}>{i18n.t('replenish.qtyLabel')}</Text>
                   <TextInput
                     style={s.input}
                     value={row.qty}
@@ -635,13 +750,13 @@ export default function ReplenishScreen() {
                   />
                 </View>
                 <View style={s.amountCol}>
-                  <Text style={[s.fieldLabel, { marginTop: 12 }]}>單瓶價格（NT$）</Text>
+                  <Text style={[s.fieldLabel, { marginTop: 12 }]}>{i18n.t('replenish.priceLabel')}</Text>
                   <TextInput
                     style={s.input}
                     value={row.unitPrice}
                     onChangeText={t => updateRow(row.id, { unitPrice: t.replace(/[^0-9.]/g, '') })}
                     keyboardType="numeric"
-                    placeholder="單瓶價格"
+                    placeholder={i18n.t('replenish.pricePlaceholder')}
                     placeholderTextColor={C.textSecondary}
                     returnKeyType="done"
                     selectTextOnFocus
@@ -650,7 +765,7 @@ export default function ReplenishScreen() {
               </View>
               {row.unitPrice !== '' && (parseInt(row.qty, 10) || 1) > 1 && (
                 <Text style={s.rowSubtotal}>
-                  小計 {rule.currency}{((parseFloat(row.unitPrice) || 0) * (parseInt(row.qty, 10) || 1)).toLocaleString()}
+                  {i18n.t('replenish.subtotal', { amount: formatCurrency((parseFloat(row.unitPrice) || 0) * (parseInt(row.qty, 10) || 1), language) })}
                 </Text>
               )}
 
@@ -661,7 +776,7 @@ export default function ReplenishScreen() {
         {/* ── Add Row ── */}
         <TouchableOpacity style={s.addBtn} onPress={addRow} activeOpacity={0.7}>
           <Ionicons name="add-circle-outline" size={20} color={C.accent} />
-          <Text style={s.addBtnText}>新增下一筆</Text>
+          <Text style={s.addBtnText}>{i18n.t('replenish.addMore')}</Text>
         </TouchableOpacity>
 
         {/* ── Confirm ── */}
@@ -674,7 +789,7 @@ export default function ReplenishScreen() {
           {confirmed ? (
             <>
               <Ionicons name="checkmark-circle" size={20} color="#fff" />
-              <Text style={s.confirmText}>登錄成功！</Text>
+              <Text style={s.confirmText}>{i18n.t('replenish.success')}</Text>
             </>
           ) : (
             <>
@@ -684,7 +799,7 @@ export default function ReplenishScreen() {
                 color={canConfirm ? '#fff' : C.textSecondary}
               />
               <Text style={[s.confirmText, !canConfirm && { color: C.textSecondary }]}>
-                確定登錄
+                {i18n.t('replenish.confirmBtn')}
               </Text>
             </>
           )}
@@ -748,6 +863,7 @@ const s = StyleSheet.create({
   statusText:   { fontSize: 10, color: C.textSecondary, fontWeight: '600' },
 
   divider:    { height: 1, backgroundColor: C.border, marginVertical: 14 },
+  overseasRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   fieldLabel: {
     fontSize: 11, fontWeight: '600', color: C.textSecondary,
     letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6,
@@ -810,6 +926,9 @@ const s = StyleSheet.create({
 
   platformHint: { fontSize: 12, color: '#8B949E', marginBottom: 6 },
   linkError: { fontSize: 12, color: C.red, marginTop: 6, marginLeft: 2 },
+
+  errorBorder: { borderColor: '#FF0000', borderWidth: 1 },
+  errorText: { color: '#FF0000', fontSize: 12, marginTop: 4, marginLeft: 4 },
 
   qtyAmountRow: { flexDirection: 'row' },
   qtyCol:       { flex: 1, marginRight: 10 },

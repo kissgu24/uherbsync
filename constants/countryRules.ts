@@ -15,9 +15,9 @@ export const COUNTRY_RULES: Record<CountryCode, CountryRule> = {
   OFF: { currency: '',    taxFreePerOrder: 0,      quotaCount: 0, freeShipping: 0,     periodLabel: '' },
 };
 
-export const COUNTRY_OPTIONS: Array<{ code: CountryCode; label: string; flag: string }> = [
-  { code: 'TW',  label: '台灣',  flag: '🇹🇼' },
-  { code: 'JP',  label: '日本',  flag: '🇯🇵' },
-  { code: 'KR',  label: '韓國',  flag: '🇰🇷' },
-  { code: 'OFF', label: '關閉',  flag: '🚫' },
+export const COUNTRY_OPTIONS: Array<{ code: CountryCode; flag: string }> = [
+  { code: 'TW', flag: '🇹🇼' },
+  { code: 'JP', flag: '🇯🇵' },
+  { code: 'KR', flag: '🇰🇷' },
+  { code: 'OFF', flag: '🚫' },
 ];
