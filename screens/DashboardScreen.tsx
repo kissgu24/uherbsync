@@ -941,7 +941,7 @@ export default function DashboardScreen() {
   const [taxData, setTaxData] = useState({
     usedCount: 0, remainCount: 0, spentAmount: 0, remainAmount: 0, pct: 0,
   });
-  const alertCat = items.find(cat => categoryTotalDays(cat) <= 7);
+  const alertCats = items.filter(cat => categoryTotalDays(cat) < 14);
 
   const ACCOUNTS = [i18n.t('common.person'), i18n.t('dashboard.multiAccount')];
 
@@ -1569,18 +1569,18 @@ export default function DashboardScreen() {
               );
             })()}
 
-            {/* ── Emergency Alert Banner ── */}
-            {alertCat && (
-              <TouchableOpacity style={s.alert} activeOpacity={0.85} onPress={() => openModal(alertCat)}>
+            {/* ── Low Stock Alert Banners (one per item < 14 days) ── */}
+            {alertCats.map(cat => (
+              <TouchableOpacity key={cat.id} style={s.alert} activeOpacity={0.85} onPress={() => openModal(cat)}>
                 <View style={s.alertIcon}>
                   <Ionicons name="warning" size={18} color="#fff" />
                 </View>
                 <Text style={s.alertText} numberOfLines={1}>
-                  {i18n.t('dashboard.alertBanner', { name: alertCat.name, days: categoryTotalDays(alertCat) })}
+                  {i18n.t('dashboard.alertBanner', { name: cat.name, days: categoryTotalDays(cat) })}
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
               </TouchableOpacity>
-            )}
+            ))}
 
             {/* ── Category List ── */}
             <View style={s.sectionTitleRow}>
