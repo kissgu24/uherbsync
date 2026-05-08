@@ -508,6 +508,14 @@ function CategoryModal({
   const dotColor = categoryDotColor(item);
   const isDirty = qty !== originalQty;
   const primaryBottleSize = item.subItems[0]?.bottleSize ?? 60;
+  const [catQtyInlineActive, setCatQtyInlineActive] = useState(false);
+  const [catQtyInlineValue, setCatQtyInlineValue] = useState('');
+
+  function commitCatQtyInline() {
+    setCatQtyInlineActive(false);
+    const n = parseInt(catQtyInlineValue, 10);
+    if (!isNaN(n) && n >= 0) onChangeQty(n);
+  }
 
   return (
     <Modal transparent animationType="fade" visible onRequestClose={onClose}>
@@ -574,10 +582,29 @@ function CategoryModal({
             >
               <Ionicons name="remove" size={22} color={qty <= 0 ? C.border : C.textPrimary} />
             </TouchableOpacity>
-            <View style={m.qtyDisplay}>
-              <Text style={m.qtyNum}>{qty}</Text>
-              <Text style={m.qtyUnit}>{translateDoseUnit(doseUnit)}</Text>
-            </View>
+            {catQtyInlineActive ? (
+              <TextInput
+                style={m.qtyInlineInput}
+                value={catQtyInlineValue}
+                onChangeText={setCatQtyInlineValue}
+                onBlur={commitCatQtyInline}
+                onSubmitEditing={commitCatQtyInline}
+                keyboardType="numeric"
+                autoFocus
+                selectTextOnFocus
+                returnKeyType="done"
+                maxLength={5}
+              />
+            ) : (
+              <TouchableOpacity
+                style={m.qtyDisplay}
+                onPress={() => { setCatQtyInlineValue(String(qty)); setCatQtyInlineActive(true); }}
+                activeOpacity={0.7}
+              >
+                <Text style={m.qtyNum}>{qty}</Text>
+                <Text style={m.qtyUnit}>{translateDoseUnit(doseUnit)}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={m.qtyBtn}
               onPress={() => onChangeQty(qty + 1)}
@@ -638,10 +665,18 @@ function SubItemAdjustModal({ sub, qty, onChangeQty, onConfirm, onDelete, onClos
   const [editingMeta, setEditingMeta] = useState(false);
   const [brandInput, setBrandInput] = useState(sub.brand);
   const [specInput, setSpecInput] = useState(sub.spec);
+  const [qtyInlineActive, setQtyInlineActive] = useState(false);
+  const [qtyInlineValue, setQtyInlineValue] = useState('');
 
   function handleMetaConfirm() {
     onUpdateBrandSpec(brandInput.trim(), specInput.trim());
     setEditingMeta(false);
+  }
+
+  function commitQtyInline() {
+    setQtyInlineActive(false);
+    const n = parseInt(qtyInlineValue, 10);
+    if (!isNaN(n) && n >= 0) onChangeQty(n);
   }
 
   return (
@@ -704,10 +739,29 @@ function SubItemAdjustModal({ sub, qty, onChangeQty, onConfirm, onDelete, onClos
             >
               <Ionicons name="remove" size={22} color={qty <= 0 ? C.border : C.textPrimary} />
             </TouchableOpacity>
-            <View style={m.qtyDisplay}>
-              <Text style={m.qtyNum}>{qty}</Text>
-              <Text style={m.qtyUnit}>{translateDoseUnit(sub.doseUnit)}</Text>
-            </View>
+            {qtyInlineActive ? (
+              <TextInput
+                style={m.qtyInlineInput}
+                value={qtyInlineValue}
+                onChangeText={setQtyInlineValue}
+                onBlur={commitQtyInline}
+                onSubmitEditing={commitQtyInline}
+                keyboardType="numeric"
+                autoFocus
+                selectTextOnFocus
+                returnKeyType="done"
+                maxLength={5}
+              />
+            ) : (
+              <TouchableOpacity
+                style={m.qtyDisplay}
+                onPress={() => { setQtyInlineValue(String(qty)); setQtyInlineActive(true); }}
+                activeOpacity={0.7}
+              >
+                <Text style={m.qtyNum}>{qty}</Text>
+                <Text style={m.qtyUnit}>{translateDoseUnit(sub.doseUnit)}</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={m.qtyBtn} onPress={() => onChangeQty(qty + 1)}>
               <Ionicons name="add" size={22} color={C.textPrimary} />
             </TouchableOpacity>
@@ -1916,6 +1970,11 @@ const m = StyleSheet.create({
   qtyDisplay:     { alignItems: 'center', minWidth: 72 },
   qtyNum:         { fontSize: 32, fontWeight: '800', color: C.textPrimary },
   qtyUnit:        { fontSize: 12, color: C.textSecondary, marginTop: -4 },
+  qtyInlineInput: {
+    fontSize: 32, fontWeight: '800', color: C.textPrimary,
+    backgroundColor: '#0D1117', borderRadius: 10, borderWidth: 1, borderColor: C.accent + '88',
+    textAlign: 'center', paddingHorizontal: 8, paddingVertical: 4, minWidth: 72,
+  },
 
   saveBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

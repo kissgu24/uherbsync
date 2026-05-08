@@ -462,7 +462,7 @@ export default function ReplenishScreen() {
         remaining: parseInt(r.totalPills, 10) || 0,
         bottleSize: r.parsed?.bottleSize ?? 0,
         doseUnit: '顆',
-        iherbUrl: '',
+        iherbUrl: r.link.trim() || '',
         isActive: true,
       };
       addPendingItem(categoryName, newSubItem, r.link || undefined, r.parsed?.platform);

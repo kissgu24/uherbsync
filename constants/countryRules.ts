@@ -9,7 +9,7 @@ export type CountryRule = {
 };
 
 export const COUNTRY_RULES: Record<CountryCode, CountryRule> = {
-  TW:  { currency: 'NT$', taxFreePerOrder: 2000,   quotaCount: 6, freeShipping: 1250,  periodLabel: '半年' },
+  TW:  { currency: 'NT$', taxFreePerOrder: 2000,   quotaCount: 6, freeShipping: 790,   periodLabel: '半年' },
   JP:  { currency: '¥',   taxFreePerOrder: 16666,  quotaCount: 0, freeShipping: 5500,  periodLabel: '每次' },
   KR:  { currency: '₩',   taxFreePerOrder: 150000, quotaCount: 0, freeShipping: 55000, periodLabel: '每次' },
   OFF: { currency: '',    taxFreePerOrder: 0,      quotaCount: 0, freeShipping: 0,     periodLabel: '' },
