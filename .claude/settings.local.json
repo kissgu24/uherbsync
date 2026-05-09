@@ -71,7 +71,28 @@
       "PowerShell(Get-ChildItem -Path \"C:\\\\uherbsync\\\\android\\\\app\\\\build\\\\outputs\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object FullName, @{N='SizeMB';E={[math]::Round\\($_.Length/1MB,2\\)}} | Sort-Object SizeMB -Descending | Select-Object -First 10)",
       "Bash(cmd /c \"rd /s /q C:\\\\\\\\uherbsync\\\\\\\\android\")",
       "Bash(echo \"exit: $?\")",
-      "PowerShell(Get-ChildItem \"C:\\\\uherbsync\\\\android\" | Select-Object Name; Write-Host \"---\"; \\(Get-ChildItem \"C:\\\\uherbsync\\\\android\" -Recurse -File | Measure-Object\\).Count)"
+      "PowerShell(Get-ChildItem \"C:\\\\uherbsync\\\\android\" | Select-Object Name; Write-Host \"---\"; \\(Get-ChildItem \"C:\\\\uherbsync\\\\android\" -Recurse -File | Measure-Object\\).Count)",
+      "PowerShell($start = Get-Date; Push-Location \"C:\\\\uherbsync\\\\android\"; .\\\\gradlew.bat clean bundleRelease 2>&1; $duration = \\(Get-Date\\) - $start; Pop-Location; Write-Host \"Build duration: $\\($duration.Minutes\\)m $\\($duration.Seconds\\)s\")",
+      "PowerShell(Get-ChildItem \"C:\\\\uherbsync\\\\android\\\\app\\\\build\\\\outputs\\\\bundle\\\\release\" | Select-Object Name, @{N='SizeMB';E={[math]::Round\\($_.Length/1MB,2\\)}}, LastWriteTime)",
+      "PowerShell(Get-ChildItem \"C:\\\\uherbsync\\\\android\\\\app\\\\build\\\\outputs\" -Recurse | Where-Object { !$_.PSIsContainer } | Select-Object FullName, @{N='SizeMB';E={[math]::Round\\($_.Length/1MB,2\\)}}, LastWriteTime | Sort-Object LastWriteTime -Descending | Select-Object -First 10)",
+      "Bash(where keytool *)",
+      "Bash(keytool *)",
+      "Bash(./gradlew.bat --stop)",
+      "PowerShell($start = Get-Date; Push-Location \"C:\\\\uherbsync\\\\android\"; .\\\\gradlew.bat bundleRelease 2>&1; $duration = \\(Get-Date\\) - $start; Pop-Location; Write-Host \"Build duration: $\\($duration.Minutes\\)m $\\($duration.Seconds\\)s\")",
+      "PowerShell(Stop-Process *)",
+      "Bash(cmd /c \"rd /s /q C:\\\\uherbsync\\\\android\")",
+      "PowerShell([System.IO.Directory]::Delete\\(\"C:\\\\uherbsync\\\\android\"\\); Write-Host \"deleted\")",
+      "PowerShell(Rename-Item *)",
+      "Bash(rmdir C:/uherbsync/android)",
+      "Bash(echo \"exit:$?\")",
+      "PowerShell(openfiles *)",
+      "Bash(mkdir -p C:/uherbsync_prebuild_tmp)",
+      "Read(//c//**)",
+      "Bash(cp C:/uherbsync/app.json .)",
+      "Bash(cp C:/uherbsync/package.json .)",
+      "Bash(cp C:/uherbsync/package-lock.json .)",
+      "PowerShell(cmd /c \"mklink /J C:\\\\uherbsync_prebuild_tmp\\\\node_modules C:\\\\uherbsync\\\\node_modules\" 2>&1)",
+      "PowerShell(cmd /c \"mklink /J C:\\\\uherbsync_prebuild_tmp\\\\assets C:\\\\uherbsync\\\\assets\" 2>&1)"
     ]
   }
 }

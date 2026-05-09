@@ -43,3 +43,5 @@ yarn-error.*
 
 # sensitive credentials
 password/
+*.keystore
+android/gradle.properties
