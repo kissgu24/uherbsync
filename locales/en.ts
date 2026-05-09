@@ -32,6 +32,8 @@ export const en = {
     tax_period_h1: 'Total Spending - H1',
     tax_period_h2: 'Total Spending - H2',
     remainingQuota: 'Remaining',
+    remainingQuotaH1: 'Tax-Free Remaining - H1',
+    remainingQuotaH2: 'Tax-Free Remaining - H2',
     quotaProgress: 'Quota Usage',
     taxDisclaimer: '※ Tax rules are for reference only; actual rules are determined by customs.',
     alertBanner: '%{name}: %{days} days left — restock now',

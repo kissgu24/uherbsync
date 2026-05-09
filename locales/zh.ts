@@ -32,6 +32,8 @@ export const zh = {
     tax_period_h1: '累計花費 - 上半年',
     tax_period_h2: '累計花費 - 下半年',
     remainingQuota: '剩餘額度',
+    remainingQuotaH1: '免稅-剩餘額度-上半年',
+    remainingQuotaH2: '免稅-剩餘額度-下半年',
     quotaProgress: '額度使用進度',
     taxDisclaimer: '※ 免稅規則僅供參考，實際以海關規定為準',
     alertBanner: '%{name} 剩餘 %{days} 天，立即補貨',

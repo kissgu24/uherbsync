@@ -771,10 +771,10 @@ function SubItemAdjustModal({ sub, qty, onChangeQty, onConfirm, onDelete, onClos
             <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
             <Text style={m.saveBtnText}>{i18n.t('common.save')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[m.secondaryBtn, { marginTop: 10 }]} onPress={onClose} activeOpacity={0.7}>
+          <TouchableOpacity style={[m.secondaryBtn, { marginTop: 12 }]} onPress={onClose} activeOpacity={0.7}>
             <Text style={m.secondaryBtnText}>{i18n.t('common.cancel')}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={m.deleteBtn} onPress={onDelete} activeOpacity={0.8}>
+          <TouchableOpacity style={[m.deleteBtn, { marginTop: 12 }]} onPress={onDelete} activeOpacity={0.8}>
             <Ionicons name="trash-outline" size={15} color={C.red} />
             <Text style={m.deleteBtnText}>{i18n.t('dashboard.deleteSubItem')}</Text>
           </TouchableOpacity>
@@ -938,6 +938,7 @@ export default function DashboardScreen() {
   const [sortPreference, setSortPreference] = useState<'days' | 'custom'>('days');
   const [defaultRestockPlatform, setDefaultRestockPlatform] = useState<RestockPlatform>('iherb');
   const [showBeginnerGuide, setShowBeginnerGuide] = useState(true);
+  const [lowStockReminderEnabled, setLowStockReminderEnabled] = useState(true);
   const [taxData, setTaxData] = useState({
     usedCount: 0, remainCount: 0, spentAmount: 0, remainAmount: 0, pct: 0,
   });
@@ -982,14 +983,16 @@ export default function DashboardScreen() {
     React.useCallback(() => {
       async function loadTaxData() {
         try {
-          const [savedCountry, savedSort, savedPlatform, savedGuide, taxOv] = await Promise.all([
+          const [savedCountry, savedSort, savedPlatform, savedGuide, taxOv, notifEnabled] = await Promise.all([
             getSetting('country'),
             getSetting('sort_preference'),
             getSetting('default_restock_platform'),
             getSetting('show_beginner_guide'),
             getSetting('tax_threshold_override'),
+            getSetting('notifications_enabled'),
           ]);
           setShowBeginnerGuide(savedGuide !== '0');
+          setLowStockReminderEnabled(notifEnabled !== 'false');
           const c: CountryCode =
             savedCountry === 'TW' || savedCountry === 'JP' || savedCountry === 'KR' || savedCountry === 'OFF'
               ? savedCountry
@@ -1014,9 +1017,10 @@ export default function DashboardScreen() {
           const [start, end] = halfYearRange();
           const periodOrders = orders.filter(o => {
             const d = new Date(o.date);
-            return d >= start && d <= end && o.totalAmount <= activeTaxThreshold && o.isOverseas;
+            return d >= start && d <= end;
           });
-          const count = periodOrders.length;
+          const taxFreeOrders = periodOrders.filter(o => o.isOverseas && o.totalAmount <= activeTaxThreshold);
+          const count = taxFreeOrders.length;
           const spent = periodOrders.reduce((s, o) => s + o.totalAmount, 0);
 
           if (rule.quotaCount > 0) {
@@ -1549,7 +1553,7 @@ export default function DashboardScreen() {
                       <>
                         <View style={s.statDivider} />
                         <View style={s.statItem}>
-                          <Text style={s.statMini}>{i18n.t('dashboard.remainingQuota')}</Text>
+                          <Text style={s.statMini}>{currentMonth <= 6 ? i18n.t('dashboard.remainingQuotaH1') : i18n.t('dashboard.remainingQuotaH2')}</Text>
                           <Text style={[s.statMed, { color: C.green }]}>
                             {formatCurrency(taxData.remainAmount, language)}
                           </Text>
@@ -1570,7 +1574,7 @@ export default function DashboardScreen() {
             })()}
 
             {/* ── Low Stock Alert Banners (one per item < 14 days) ── */}
-            {alertCats.map(cat => (
+            {lowStockReminderEnabled && alertCats.map(cat => (
               <TouchableOpacity key={cat.id} style={s.alert} activeOpacity={0.85} onPress={() => openModal(cat)}>
                 <View style={s.alertIcon}>
                   <Ionicons name="warning" size={18} color="#fff" />
@@ -1672,6 +1676,14 @@ export default function DashboardScreen() {
                                 size={20}
                                 color={sub.isActive ? C.green : C.textSecondary}
                               />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => handleSubItemQtyPress(sub, cat)}
+                              activeOpacity={0.7}
+                              hitSlop={8}
+                              style={{ paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <Ionicons name="create-outline" size={16} color={C.textSecondary} />
                             </TouchableOpacity>
                             {inlineEditId === sub.id ? (
                               <View style={s.subItemRight}>
@@ -1900,7 +1912,7 @@ const s = StyleSheet.create({
 
   // ── Sub-items ──
   subItemList:     { borderTopWidth: 1, borderTopColor: C.border },
-  subItemRow:      { flexDirection: 'row', alignItems: 'stretch' },
+  subItemRow:      { flexDirection: 'row', alignItems: 'center' },
   subItemRowDivider: { borderBottomWidth: 1, borderBottomColor: '#21262D' },
   subItemLeft: {
     flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10,

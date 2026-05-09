@@ -641,7 +641,7 @@ export default function ReplenishScreen() {
 
               {row.category === '其他' && (
                 <TextInput
-                  style={[s.input, { marginTop: 8 }]}
+                  style={[s.input, { marginTop: 8, borderColor: row.customCategory.trim() ? C.border : C.red }]}
                   value={row.customCategory}
                   onChangeText={t => updateRow(row.id, { customCategory: t })}
                   onBlur={() => commitCustomCategory(row.id, row.customCategory)}
