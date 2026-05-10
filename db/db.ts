@@ -248,8 +248,15 @@ export async function loadCategoryItems(): Promise<CategoryItem[]> {
 }
 
 export async function saveCategoryItems(items: CategoryItem[]): Promise<void> {
+  const totalItemsInSnapshot = items.reduce((acc, c) => acc + c.subItems.length, 0);
   const db = await getDB();
   await db.withTransactionAsync(async () => {
+    const checkCount = await db.getAllAsync<{ count: number }>('SELECT COUNT(*) as count FROM category_items');
+    const dbItemsCount = checkCount[0]?.count ?? 0;
+    if (totalItemsInSnapshot === 0 && dbItemsCount > 0) {
+      if (__DEV__) console.error('[FATAL ERROR] ATTEMPTING TO OVERWRITE DB WITH EMPTY SNAPSHOT!');
+      throw new Error('[FATAL] saveCategoryItems blocked: snapshot is empty but DB has data');
+    }
     await db.runAsync('DELETE FROM sub_items');
     await db.runAsync('DELETE FROM category_items');
     for (const cat of items) {

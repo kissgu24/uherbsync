@@ -99,6 +99,14 @@ function parseMomo(url: string): NewPlatformResult | null {
 }
 
 function parseCostco(url: string): NewPlatformResult | null {
+  // Pre-normalize malformed URLs where product ID is embedded inside a query param value,
+  // e.g. https://www.costco.com.tw?utm_source=line/p/240666
+  const qIdx = url.indexOf('?');
+  if (qIdx !== -1 && /\/p\/\d+/.test(url.slice(qIdx))) {
+    const m = url.match(/\/p\/(\d+)/);
+    if (m) url = `https://www.costco.com.tw/p/${m[1]}`;
+  }
+
   const idMatch = url.match(/\/p\/(\d+)/);
   if (!idMatch) return null;
   const productId = idMatch[1];
@@ -142,7 +150,16 @@ function parseCoupang(url: string): NewPlatformResult | null {
   const seg       = segMatch[1];
   const productId = seg.match(/(\d+)$/)?.[1] ?? seg;
   let itemId = '';
-  try { itemId = new URL(url).searchParams.get('itemId') ?? ''; } catch {}
+  let normalizedUrl = url;
+  try {
+    const u = new URL(url);
+    u.protocol = 'https:';
+    itemId = u.searchParams.get('itemId') ?? '';
+    u.search = '';
+    u.pathname = u.pathname.replace(/-(\d{10,})$/, '');
+    if (itemId) u.searchParams.set('itemId', itemId);
+    normalizedUrl = u.toString().replace(/\?$/, '');
+  } catch {}
   const slug = decodeURIComponent(seg).replace(/-/g, ' ').trim();
   const meta = extractSupplementMetadata(slug);
   return {
@@ -152,7 +169,7 @@ function parseCoupang(url: string): NewPlatformResult | null {
     bottleSize: meta.quantity ?? null,
     productId: itemId ? `${productId}-${itemId}` : productId,
     platform: 'coupang',
-    normalizedUrl: removeTrackingParams(url),
+    normalizedUrl,
   };
 }
 
@@ -166,7 +183,7 @@ export async function parseNewPlatformUrl(url: string): Promise<NewPlatformResul
 
   switch (platform) {
     case 'momo':    return parseMomo(cleaned);
-    case 'costco':  return parseCostco(cleaned);
+    case 'costco':  return parseCostco(resolved);
     case 'shopee':  return parseShopee(cleaned);
     case 'coupang': return parseCoupang(cleaned);
   }

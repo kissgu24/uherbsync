@@ -21,8 +21,9 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useCategories, SubItem } from '../contexts/CategoriesContext';
 import { CategoryItem, loadCategoryItems, saveCategoryItems, loadOrders, updateSubItemRemaining, updateSubItemActive, updateSubItemBrandSpec, updateCategoryDose, updateCategoryTiming, getSetting, setSetting, runDailyDeductionIfNeeded, upsertProductSource, logEvent, getProductUrl } from '../db/db';
 import { COUNTRY_RULES, CountryCode } from '../constants/countryRules';
-import { AMAZON_TAG, buildIHerbSearchUrl, buildIHerbProductUrl, buildRestockUrl, buildPlatformSearchUrl, detectPlatform, RestockPlatform } from '../constants/affiliate';
+import { AMAZON_TAG, buildIHerbSearchUrl, buildIHerbProductUrl, buildPlatformSearchUrl, detectPlatform, RestockPlatform } from '../constants/affiliate';
 import { formatCurrency } from '../utils/currency';
+import { executeReorder } from '../utils/reorderHandler';
 import { supabase } from '../lib/supabase';
 import { i18n } from '../i18n';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -627,7 +628,7 @@ function CategoryModal({
 
           <TouchableOpacity
             style={m.primaryBtn}
-            onPress={() => Linking.openURL(restockUrl)}
+            onPress={() => executeReorder({ keyword: '', url: restockUrl })}
             activeOpacity={0.8}
           >
             <Ionicons name="cart-outline" size={16} color="#fff" />
@@ -906,7 +907,15 @@ export default function DashboardScreen() {
   const [items, setItems] = useState<CategoryItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(true);
   const itemsReadyRef = useRef(false);
+
+  const trackedSetItems = (newItems: CategoryItem[], source: string) => {
+    if (__DEV__ && (newItems?.length || 0) === 0) {
+      console.warn(`[STATE TRACE] WARNING: setItems(${source}) called with empty array! Stack:`, new Error().stack);
+    }
+    setItems(newItems);
+  };
   const isDeductingRef = useRef(false);
+  const isSavingRef = useRef(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [showDiscountModal, setShowDiscountModal] = useState(false);
 
@@ -943,6 +952,7 @@ export default function DashboardScreen() {
     usedCount: 0, remainCount: 0, spentAmount: 0, remainAmount: 0, pct: 0,
   });
   const alertCats = items.filter(cat => categoryTotalDays(cat) < 14);
+  const sortedAlerts = [...alertCats].sort((a, b) => categoryTotalDays(a) - categoryTotalDays(b));
 
   const ACCOUNTS = [i18n.t('common.person'), i18n.t('dashboard.multiAccount')];
 
@@ -956,14 +966,14 @@ export default function DashboardScreen() {
         const saved = await loadCategoryItems();
         if (saved.length > 0) {
           loadedItems = saved;
-          setItems(saved);
+          trackedSetItems(saved, 'initialLoad:fromDB');
         } else {
-          setItems(INITIAL_ITEMS);
+          trackedSetItems(INITIAL_ITEMS, 'initialLoad:seedEmptyDB');
           await saveCategoryItems(INITIAL_ITEMS);
         }
       } catch (e) {
         console.error('DashboardScreen initial load error', e);
-        setItems(INITIAL_ITEMS);
+        trackedSetItems(INITIAL_ITEMS, 'initialLoad:errorFallback');
       } finally {
         itemsReadyRef.current = true;
         setItemsLoading(false);
@@ -975,7 +985,18 @@ export default function DashboardScreen() {
   // ── Persist items to DB whenever they change ───────────────────────────
   useEffect(() => {
     if (!itemsReadyRef.current) return;
-    saveCategoryItems(items);
+    if (isSavingRef.current) {
+      if (__DEV__) console.log('[SERIALIZATION] Save blocked: Transaction already in progress.');
+      return;
+    }
+    isSavingRef.current = true;
+    saveCategoryItems(items)
+      .catch(e => {
+        if (__DEV__) console.error('[DB FATAL] FK Failure caught. Aborting DB write but PRESERVING memory state.', e);
+      })
+      .finally(() => {
+        isSavingRef.current = false;
+      });
   }, [items]);
 
   // ── Reload country setting + tax quota from DB on focus ───────────────
@@ -1052,7 +1073,9 @@ export default function DashboardScreen() {
     React.useCallback(() => {
       const pending = consumeRef.current();
       if (pending.length === 0) return;
-      const pendingSources: Array<{ categoryItemId: string; url: string }> = [];
+      // upsertProductSource is intentionally skipped here: it fires before category_items
+      // exists in DB (setItems is async), causing FK constraint failure. iherb_url is
+      // already persisted in sub_items.iherb_url and serves as the reorder URL fallback.
       setItems(prev => {
         let next = [...prev];
         for (const { categoryName, subItem, sourceUrl } of pending) {
@@ -1073,7 +1096,7 @@ export default function DashboardScreen() {
               }
               return { ...cat, subItems: [...cat.subItems, subItem] };
             });
-            if (sourceUrl) pendingSources.push({ categoryItemId: catId, url: sourceUrl });
+            // sourceUrl intentionally not queued — see pendingSources bypass comment above
           } else {
             const newId = `cat_${Date.now()}_${Math.random().toString(36).slice(2)}`;
             next = [...next, {
@@ -1087,14 +1110,11 @@ export default function DashboardScreen() {
               iherbUrl: buildIHerbSearchUrl(categoryName),
               subItems: [subItem],
             }];
-            if (sourceUrl) pendingSources.push({ categoryItemId: newId, url: sourceUrl });
+          // sourceUrl intentionally not queued — see pendingSources bypass comment above
           }
         }
         return next;
       });
-      for (const src of pendingSources) {
-        upsertProductSource(src).catch(e => console.error('upsertProductSource error', e));
-      }
     }, [])
   );
 
@@ -1109,7 +1129,11 @@ export default function DashboardScreen() {
         try {
           await runDailyDeductionIfNeeded();
           const refreshed = await loadCategoryItems();
-          if (refreshed.length > 0) setItems(refreshed);
+          if (isSavingRef.current) {
+            if (__DEV__) console.log('[CONSISTENCY] Blocked stale DB reload. Fresh state is being persisted.');
+          } else if (refreshed.length > 0) {
+            trackedSetItems(refreshed, 'dailyDeductionFocus');
+          }
         } catch (e) {
           console.error('daily deduction focus error', e);
         } finally {
@@ -1214,43 +1238,21 @@ export default function DashboardScreen() {
     const keyword = `${sub.brand} ${sub.spec}`.trim();
     const productId = sub.id;
     const baseUrl = await getProductUrl(sub.id, sub.iherbUrl);
-    let url: string;
-
-    if (baseUrl) {
-      const platform = detectPlatform(baseUrl);
-      if (platform === 'iherb') {
-        url = buildIHerbProductUrl(baseUrl);
-      } else if (platform === 'amazon') {
-        const asin = baseUrl.match(/\/dp\/([A-Z0-9]{10})/)?.[1];
-        url = asin
-          ? `https://www.amazon.com/dp/${asin}?tag=${AMAZON_TAG}`
-          : buildPlatformSearchUrl(keyword, 'amazon');
-      } else {
-        url = baseUrl;
-      }
-    } else {
-      url = buildPlatformSearchUrl(keyword, defaultRestockPlatform);
-    }
 
     Alert.alert(
       i18n.t('dashboard.restockAlert'),
       `${sub.brand}\n${sub.spec}`,
       [
         { text: i18n.t('common.cancel'), style: 'cancel' },
-        { text: i18n.t('dashboard.restock'), onPress: () =>
-          Linking.openURL(url)
-            .then(() => {
-              logEvent({
-                event_type: 'click_product',
-                target_type: 'product',
-                target_id: productId || url,
-                context: { screen: 'DashboardScreen', url: url },
-              });
-            })
-            .catch((err) => {
-              console.warn('Could not open URL:', err);
-            })
-        },
+        { text: i18n.t('dashboard.restock'), onPress: () => {
+          executeReorder({ keyword, url: baseUrl || undefined });
+          logEvent({
+            event_type: 'click_product',
+            target_type: 'product',
+            target_id: productId || baseUrl || keyword,
+            context: { screen: 'DashboardScreen', url: baseUrl || keyword },
+          });
+        }},
       ],
     );
   }
@@ -1532,7 +1534,7 @@ export default function DashboardScreen() {
                     {showCountCol && (
                       <>
                         <View style={s.statItem}>
-                          <Text style={s.statMini}>{i18n.t('dashboard.usedOrders')}</Text>
+                          <Text style={s.statMini} numberOfLines={1} ellipsizeMode="tail">{i18n.t('dashboard.usedOrders')}</Text>
                           <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
                             <Text style={s.statBig}>{taxData.usedCount}</Text>
                             {rule.quotaCount > 0 && (
@@ -1544,7 +1546,7 @@ export default function DashboardScreen() {
                       </>
                     )}
                     <View style={s.statItem}>
-                      <Text style={s.statMini}>{taxTitle}</Text>
+                      <Text style={s.statMini} numberOfLines={1} ellipsizeMode="tail">{taxTitle}</Text>
                       <Text style={[s.statMed, { color: C.orange }]}>
                         {formatCurrency(taxData.spentAmount, language)}
                       </Text>
@@ -1553,7 +1555,9 @@ export default function DashboardScreen() {
                       <>
                         <View style={s.statDivider} />
                         <View style={s.statItem}>
-                          <Text style={s.statMini}>{currentMonth <= 6 ? i18n.t('dashboard.remainingQuotaH1') : i18n.t('dashboard.remainingQuotaH2')}</Text>
+                          <Text style={s.statMini} numberOfLines={1} ellipsizeMode="tail">
+                            {currentMonth <= 6 ? i18n.t('dashboard.remainingQuotaH1') : i18n.t('dashboard.remainingQuotaH2')}
+                          </Text>
                           <Text style={[s.statMed, { color: C.green }]}>
                             {formatCurrency(taxData.remainAmount, language)}
                           </Text>
@@ -1573,18 +1577,42 @@ export default function DashboardScreen() {
               );
             })()}
 
-            {/* ── Low Stock Alert Banners (one per item < 14 days) ── */}
-            {lowStockReminderEnabled && alertCats.map(cat => (
-              <TouchableOpacity key={cat.id} style={s.alert} activeOpacity={0.85} onPress={() => openModal(cat)}>
-                <View style={s.alertIcon}>
-                  <Ionicons name="warning" size={18} color="#fff" />
-                </View>
-                <Text style={s.alertText} numberOfLines={1}>
-                  {i18n.t('dashboard.alertBanner', { name: cat.name, days: categoryTotalDays(cat) })}
-                </Text>
-                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
-              </TouchableOpacity>
-            ))}
+            {/* ── Low Stock Alert Banners (sorted by urgency, priority stack) ── */}
+            {lowStockReminderEnabled && sortedAlerts.length > 0 && (
+              <View style={{ marginBottom: 10 }}>
+                {sortedAlerts.map((cat, index) => (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[
+                      s.alert,
+                      {
+                        marginTop: index === 0 ? 0 : -55,
+                        marginBottom: 0,
+                        zIndex: sortedAlerts.length - index,
+                        borderColor: 'rgba(255,255,255,0.2)',
+                        transform: [
+                          { scale: 1 - index * 0.04 },
+                          { translateY: index * 4 },
+                        ],
+                        opacity: 1 - index * 0.1,
+                        elevation: Math.max(5 - index, 0),
+                        shadowOpacity: Math.max(0.5 - index * 0.05, 0.2),
+                      },
+                    ]}
+                    activeOpacity={0.85}
+                    onPress={() => openModal(cat)}
+                  >
+                    <View style={s.alertIcon}>
+                      <Ionicons name="warning" size={18} color="#fff" />
+                    </View>
+                    <Text style={s.alertText} numberOfLines={1}>
+                      {i18n.t('dashboard.alertBanner', { name: cat.name, days: categoryTotalDays(cat) })}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
 
             {/* ── Category List ── */}
             <View style={s.sectionTitleRow}>
@@ -1866,6 +1894,8 @@ const s = StyleSheet.create({
   alert: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#B91C1C',
     borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#EF4444',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 8,
+    elevation: 6,
   },
   alertIcon: {
     width: 28, height: 28, borderRadius: 14,

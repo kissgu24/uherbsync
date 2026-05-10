@@ -329,8 +329,7 @@ export default function ReplenishScreen() {
 
   const total = rows.reduce((sum, r) => {
     const price = parseFloat(r.unitPrice);
-    const qty = parseInt(r.qty, 10) || 1;
-    return sum + (isNaN(price) ? 0 : price * qty);
+    return sum + (isNaN(price) ? 0 : price);
   }, 0);
   const overBudget = country !== 'OFF' && activeTaxThreshold > 0 && total > activeTaxThreshold;
 
@@ -462,7 +461,7 @@ export default function ReplenishScreen() {
         remaining: parseInt(r.totalPills, 10) || 0,
         bottleSize: r.parsed?.bottleSize ?? 0,
         doseUnit: '顆',
-        iherbUrl: r.link.trim() || '',
+        iherbUrl: r.parsed?.normalizedUrl || r.link.trim() || '',
         isActive: true,
       };
       addPendingItem(categoryName, newSubItem, r.link || undefined, r.parsed?.platform);
@@ -476,7 +475,7 @@ export default function ReplenishScreen() {
       totalAmount: total,
       isOverseas,
       items: rows.map(r => {
-        const unitPrice = parseFloat(r.unitPrice) || 0;
+        const totalPrice = parseFloat(r.unitPrice) || 0;
         const qty = parseInt(r.qty, 10) || 1;
         const brand = r.brandInput.trim() || 'NA';
         const spec  = r.specInput.trim()  || 'NA';
@@ -484,8 +483,8 @@ export default function ReplenishScreen() {
           categoryName: r.category === '其他' ? r.customCategory.trim() : r.category,
           productName: r.parsed?.productName || (r.brandInput.trim() ? `${brand} - ${spec}` : spec),
           qty,
-          unitPrice,
-          amount: unitPrice * qty,
+          unitPrice: totalPrice / qty,
+          amount: totalPrice,
           brand,
           spec,
         };
@@ -738,7 +737,7 @@ export default function ReplenishScreen() {
               {/* d. Qty + Unit Price */}
               <View style={s.qtyAmountRow}>
                 <View style={s.qtyCol}>
-                  <Text style={[s.fieldLabel, { marginTop: 12 }]}>{i18n.t('replenish.qtyLabel')}</Text>
+                  <Text style={[s.fieldLabel, { marginTop: 12, minHeight: 36, textAlign: 'left' }]}>{i18n.t('replenish.qtyLabel')}</Text>
                   <TextInput
                     style={s.input}
                     value={row.qty}
@@ -750,9 +749,9 @@ export default function ReplenishScreen() {
                   />
                 </View>
                 <View style={s.amountCol}>
-                  <Text style={[s.fieldLabel, { marginTop: 12 }]}>{i18n.t('replenish.priceLabel')}</Text>
+                  <Text style={[s.fieldLabel, { marginTop: 12, minHeight: 36, textAlign: 'left' }]}>{i18n.t('replenish.priceLabel')}</Text>
                   <TextInput
-                    style={s.input}
+                    style={[s.input, { borderColor: !row.unitPrice || row.unitPrice.trim().length === 0 ? C.red : C.border }]}
                     value={row.unitPrice}
                     onChangeText={t => updateRow(row.id, { unitPrice: t.replace(/[^0-9.]/g, '') })}
                     keyboardType="numeric"
@@ -765,7 +764,7 @@ export default function ReplenishScreen() {
               </View>
               {row.unitPrice !== '' && (parseInt(row.qty, 10) || 1) > 1 && (
                 <Text style={s.rowSubtotal}>
-                  {i18n.t('replenish.subtotal', { amount: formatCurrency((parseFloat(row.unitPrice) || 0) * (parseInt(row.qty, 10) || 1), language) })}
+                  {i18n.t('replenish.subtotal', { amount: formatCurrency((parseFloat(row.unitPrice) || 0) / (parseInt(row.qty, 10) || 1), language) })}
                 </Text>
               )}
 

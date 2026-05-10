@@ -13,7 +13,8 @@
       "backgroundColor": "#0D1117"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kissgu24.uherbsync"
     },
     "android": {
       "package": "com.kissgu24.uherbsync",

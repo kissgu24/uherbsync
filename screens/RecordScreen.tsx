@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { loadOrders, deleteOrder, updateOrderOverseas, OrderRecord } from '../db/db';
-import { buildRestockUrl } from '../constants/affiliate';
+import { executeReorder } from '../utils/reorderHandler';
 import { i18n } from '../i18n';
 import { useLanguage } from '../contexts/LanguageContext';
 import { formatCurrency } from '../utils/currency';
@@ -86,10 +86,7 @@ function ItemRow({ item, isLast }: ItemRowProps) {
       <Text style={d.colCat} numberOfLines={1}>{item.categoryName || '—'}</Text>
       <TouchableOpacity
         style={d.colBrand}
-        onPress={() => {
-          const url = buildRestockUrl('', `${brand} ${spec}`.trim());
-          Linking.openURL(url);
-        }}
+        onPress={() => executeReorder({ keyword: `${brand} ${spec}`.trim() })}
         activeOpacity={0.7}
       >
         <Text style={d.brandTxt} numberOfLines={1}>{brand}</Text>

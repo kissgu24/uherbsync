@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, Switch, StyleSheet, ScrollView
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import Constants from 'expo-constants';
-import { getSetting, setSetting, runDailyDeductionIfNeeded } from '../db/db';
+import { getSetting, setSetting } from '../db/db';
 import { i18n } from '../i18n';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -122,17 +122,6 @@ export default function SettingsScreen() {
   async function toggleBeginnerGuide(value: boolean) {
     setShowBeginnerGuide(value);
     await setSetting('show_beginner_guide', value ? '1' : '0');
-  }
-
-  async function handleSimulateDeduction() {
-    try {
-      await setSetting('last_deduct_date', '');
-      await runDailyDeductionIfNeeded();
-      Alert.alert('已扣除，請切換至首頁確認');
-    } catch (e) {
-      console.error('simulate deduction error', e);
-      Alert.alert('扣除失敗，請查看 console');
-    }
   }
 
   return (
@@ -301,19 +290,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {__DEV__ && (
-          <View style={[s.section, s.sectionTop]}>
-            <Text style={s.sectionLabel}>開發測試</Text>
-            <TouchableOpacity
-              style={s.devTestBtn}
-              onPress={handleSimulateDeduction}
-              activeOpacity={0.75}
-            >
-              <Text style={s.devTestBtnText}>🧪 模擬每日扣除</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
         <View style={s.versionContainer}>
           <Text style={s.versionText}>uHerbSync</Text>
           <Text style={s.versionText}>{i18n.t('settings.version', { version: appVersion })}</Text>
@@ -403,20 +379,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 2,
   },
   comingSoonText: { fontSize: 10, fontWeight: '700', color: C.textSecondary, letterSpacing: 0.5 },
-
-  devTestBtn: {
-    borderWidth: 1.5,
-    borderColor: '#FF9500',
-    borderRadius: 12,
-    paddingVertical: 13,
-    alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
-  devTestBtnText: {
-    color: '#FF9500',
-    fontSize: 15,
-    fontWeight: '600',
-  },
 
   versionContainer: { marginTop: 32, alignItems: 'center', gap: 4 },
   versionText: { fontSize: 12, color: C.textSecondary, opacity: 0.6 },

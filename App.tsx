@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,7 +9,7 @@ import Constants from 'expo-constants';
 import { CategoriesProvider } from './contexts/CategoriesContext';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { i18n } from './i18n';
-import { getSetting } from './db/db';
+import { initDB, getSetting } from './db/db';
 
 const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -114,6 +114,14 @@ function AppContent() {
 }
 
 export default function App() {
+  const [dbReady, setDbReady] = useState(false);
+
+  useEffect(() => {
+    initDB().then(() => setDbReady(true));
+  }, []);
+
+  if (!dbReady) return null;
+
   return (
     <SafeAreaProvider>
       <CategoriesProvider>
