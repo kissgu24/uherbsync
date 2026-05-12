@@ -92,7 +92,19 @@
       "Bash(cp C:/uherbsync/package.json .)",
       "Bash(cp C:/uherbsync/package-lock.json .)",
       "PowerShell(cmd /c \"mklink /J C:\\\\uherbsync_prebuild_tmp\\\\node_modules C:\\\\uherbsync\\\\node_modules\" 2>&1)",
-      "PowerShell(cmd /c \"mklink /J C:\\\\uherbsync_prebuild_tmp\\\\assets C:\\\\uherbsync\\\\assets\" 2>&1)"
+      "PowerShell(cmd /c \"mklink /J C:\\\\uherbsync_prebuild_tmp\\\\assets C:\\\\uherbsync\\\\assets\" 2>&1)",
+      "WebFetch(domain:www.tw.coupang.com)",
+      "Bash(pod install *)",
+      "Bash(xcodebuild -workspace /Users/ccku/uherbsync/ios/uHerbSync.xcworkspace -scheme uHerbSync -configuration Release -destination generic/platform=iOS -archivePath __TRACKED_VAR__/Desktop/uHerbSync_1.1.1_build2.xcarchive archive -allowProvisioningUpdates)",
+      "Bash(security find-identity *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2\\)\\)\")",
+      "Bash(eas whoami *)",
+      "Bash(eas credentials *)",
+      "Bash(eas device:list)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/Users/ccku/uherbsync/app.json'\\)\\); ios=d['expo']['ios']; print\\(f\\\\\"version: {d['expo']['version']}, bundleId: {ios['bundleIdentifier']}, buildNumber: {ios['buildNumber']}\\\\\"\\)\")",
+      "Bash(grep -v \"^--$\")",
+      "Bash(eas build *)",
+      "Bash(eas submit *)"
     ]
   }
 }

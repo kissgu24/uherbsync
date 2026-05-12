@@ -24,6 +24,7 @@ import { COUNTRY_RULES, CountryCode } from '../constants/countryRules';
 import { AMAZON_TAG, buildIHerbSearchUrl, buildIHerbProductUrl, buildPlatformSearchUrl, detectPlatform, RestockPlatform } from '../constants/affiliate';
 import { formatCurrency } from '../utils/currency';
 import { executeReorder } from '../utils/reorderHandler';
+import { useInventory } from '../hooks/useInventory';
 import { supabase } from '../lib/supabase';
 import { i18n } from '../i18n';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -862,47 +863,13 @@ function QuickAddModal({ existingNames, onConfirm, onClose }: QuickAddModalProps
   );
 }
 
-// ─── Low Stock Notification ───────────────────────────────────────────────────
-
-async function checkLowStockNotifications(items: CategoryItem[]): Promise<void> {
-  if (isExpoGo) return;
-  try {
-    const enabled = await getSetting('notifications_enabled');
-    if (enabled === 'false') return;
-
-    const today = new Date().toISOString().slice(0, 10);
-    const lastNotify = await getSetting('last_notify_date');
-    if (lastNotify === today) return;
-
-    const lowItems = items.flatMap(cat =>
-      cat.subItems
-        .filter(si => si.isActive && cat.dailyDose > 0 && Math.floor(si.remaining / cat.dailyDose) < 14)
-        .map(si => ({ cat, si, days: Math.floor(si.remaining / cat.dailyDose) }))
-    );
-
-    for (const { cat: _cat, si, days } of lowItems) {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: i18n.t('dashboard.notifTitle'),
-          body: i18n.t('dashboard.notifBody', { name: `${si.brand} ${si.spec}`, days }),
-        },
-        trigger: null,
-      });
-    }
-
-    if (lowItems.length > 0) {
-      await setSetting('last_notify_date', today);
-    }
-  } catch (e) {
-    console.error('checkLowStockNotifications error', e);
-  }
-}
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function DashboardScreen() {
   const { language } = useLanguage();
   const { renameCategory, addCategory, removeCategory, consumePendingItems, isReady } = useCategories();
+  const { scheduleForItem, scheduleForAll, cancelForItem } = useInventory();
   const [activeAccount, setActiveAccount] = useState(0);
   const [items, setItems] = useState<CategoryItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(true);
@@ -978,7 +945,7 @@ export default function DashboardScreen() {
         itemsReadyRef.current = true;
         setItemsLoading(false);
       }
-      checkLowStockNotifications(loadedItems);
+      scheduleForAll(loadedItems);
     })();
   }, [isReady]);
 
@@ -1133,6 +1100,7 @@ export default function DashboardScreen() {
             if (__DEV__) console.log('[CONSISTENCY] Blocked stale DB reload. Fresh state is being persisted.');
           } else if (refreshed.length > 0) {
             trackedSetItems(refreshed, 'dailyDeductionFocus');
+            scheduleForAll(refreshed);
           }
         } catch (e) {
           console.error('daily deduction focus error', e);
@@ -1199,11 +1167,19 @@ export default function DashboardScreen() {
     }));
     setOriginalQty(currentQty);
 
+    const updatedCat: CategoryItem = {
+      ...selectedCat,
+      subItems: selectedCat.subItems.map((si, i) =>
+        i === maxIdx ? { ...si, remaining: newRemaining } : si
+      ),
+    };
+
     try {
       await updateSubItemRemaining(targetSub.id, newRemaining);
     } catch (e) {
       console.error('saveQty DB error', e);
     }
+    scheduleForItem(updatedCat);
   }
 
   function handleRename(newName: string) {
@@ -1270,6 +1246,11 @@ export default function DashboardScreen() {
       cat.id !== catId ? cat :
       { ...cat, subItems: cat.subItems.map(si => si.id === sub.id ? { ...si, remaining: qty } : si) }
     ));
+    const parentCat = items.find(c => c.id === catId);
+    if (parentCat) {
+      const updated = { ...parentCat, subItems: parentCat.subItems.map(si => si.id === sub.id ? { ...si, remaining: qty } : si) };
+      scheduleForItem(updated);
+    }
     try {
       await updateSubItemRemaining(sub.id, qty);
     } catch (e) {
@@ -1286,6 +1267,11 @@ export default function DashboardScreen() {
         subItems: cat.subItems.map(si => si.id === sub.id ? { ...si, isActive: newActive } : si),
       };
     }));
+    const parentCat = items.find(c => c.id === catId);
+    if (parentCat) {
+      const updated = { ...parentCat, subItems: parentCat.subItems.map(si => si.id === sub.id ? { ...si, isActive: newActive } : si) };
+      scheduleForItem(updated);
+    }
     try {
       await updateSubItemActive(sub.id, newActive);
     } catch (e) {
@@ -1306,6 +1292,11 @@ export default function DashboardScreen() {
     }));
     setShowSubItemAdjust(false);
     setSubItemAdjustTarget(null);
+    const parentCat = items.find(c => c.id === catId);
+    if (parentCat) {
+      const updated = { ...parentCat, subItems: parentCat.subItems.map(si => si.id === sub.id ? { ...si, remaining: qty } : si) };
+      scheduleForItem(updated);
+    }
     try {
       await updateSubItemRemaining(sub.id, qty);
     } catch (e) {
@@ -1352,10 +1343,12 @@ export default function DashboardScreen() {
             if (remainingSubs.length === 0) {
               setItems(prev => prev.filter(c => c.id !== catId));
               removeCategory(cat.name);
+              cancelForItem(catId);
             } else {
               setItems(prev => prev.map(c =>
                 c.id !== catId ? c : { ...c, subItems: remainingSubs }
               ));
+              scheduleForItem({ ...cat, subItems: remainingSubs });
             }
           },
         },
@@ -1370,6 +1363,7 @@ export default function DashboardScreen() {
     setItems(prev => prev.map(cat =>
       cat.id === selectedCat.id ? { ...cat, dailyDose: v, doseUnit: u } : cat
     ));
+    scheduleForItem({ ...selectedCat, dailyDose: v, doseUnit: u });
     try {
       await updateCategoryDose(selectedCat.id, v, u);
     } catch (e) {
@@ -1405,6 +1399,7 @@ export default function DashboardScreen() {
           onPress: () => {
             setItems(prev => prev.filter(c => c.id !== cat.id));
             removeCategory(cat.name);
+            cancelForItem(cat.id);
           },
         },
       ],
@@ -1442,6 +1437,7 @@ export default function DashboardScreen() {
     setItems(prev => [...prev, newCat]);
     addCategory(name);
     setShowQuickAdd(false);
+    scheduleForItem(newCat);
   }
 
   // ── Render ─────────────────────────────────────────────────────────────

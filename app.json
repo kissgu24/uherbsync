@@ -2,7 +2,7 @@
   "expo": {
     "name": "uHerbSync",
     "slug": "uHerbSync",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/store/icon-512.png",
     "userInterfaceStyle": "light",
@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.kissgu24.uherbsync"
+      "bundleIdentifier": "com.kissgu24.uherbsync",
+      "buildNumber": "2",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.kissgu24.uherbsync",
@@ -39,6 +43,11 @@
         }
       ],
       "expo-localization"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "12cf8449-7600-4a58-acbb-181b092cb3f1"
+      }
+    }
   }
 }

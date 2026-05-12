@@ -201,6 +201,14 @@ export const en = {
     deleteError: 'Delete failed. Please try again.',
     overseas: 'Overseas',
   },
+  notifications: {
+    warnTitle:     '⚠️ %{name} running low',
+    warn14Body:    'Only 14 days of %{name} left. Tap to reorder.',
+    criticalTitle: '🔴 %{name} critically low',
+    warn7Body:     'Only 7 days of %{name} left — reorder now!',
+    depletedTitle: '📦 %{name} depleted',
+    depletedBody:  '%{name} runs out today. Time to restock!',
+  },
   settings: {
     title: 'Settings',
     taxRegion: 'Tax-Free Region',

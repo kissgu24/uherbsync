@@ -201,6 +201,14 @@ export const zh = {
     deleteError: '刪除失敗，請再試一次。',
     overseas: '海外',
   },
+  notifications: {
+    warnTitle:     '⚠️ %{name} 庫存偏低',
+    warn14Body:    '%{name} 只剩 14 天份量，記得安排補貨！',
+    criticalTitle: '🔴 %{name} 庫存告急',
+    warn7Body:     '%{name} 只剩 7 天份量，請盡快補貨！',
+    depletedTitle: '📦 %{name} 今日用完',
+    depletedBody:  '%{name} 預計今日耗盡，立即補貨！',
+  },
   settings: {
     title: '設定',
     taxRegion: '免稅追蹤地區',

@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { useState, useEffect, useRef } from 'react';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -10,6 +10,9 @@ import { CategoriesProvider } from './contexts/CategoriesContext';
 import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { i18n } from './i18n';
 import { initDB, getSetting } from './db/db';
+import { initNotificationChannelAsync } from './services/notificationService';
+
+export const navigationRef = createNavigationContainerRef<Record<string, undefined>>();
 
 const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -33,6 +36,7 @@ const TAB_ICONS: Record<string, { active: IoniconName; inactive: IoniconName }> 
 
 function AppContent() {
   const { language } = useLanguage();
+  const responseListenerRef = useRef<ReturnType<typeof Notifications.addNotificationResponseReceivedListener> | null>(null);
 
   useEffect(() => {
     if (isExpoGo) return;
@@ -42,14 +46,25 @@ function AppContent() {
         if (enabled !== 'false') {
           await Notifications.requestPermissionsAsync();
         }
+        await initNotificationChannelAsync();
       } catch {}
     })();
+
+    responseListenerRef.current = Notifications.addNotificationResponseReceivedListener(() => {
+      if (navigationRef.isReady()) {
+        navigationRef.navigate('dashboard');
+      }
+    });
+
+    return () => {
+      responseListenerRef.current?.remove();
+    };
   }, []);
 
   return (
     <>
       <StatusBar style="light" />
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <Tab.Navigator
           screenOptions={({ route }) => ({
             headerShown: false,
