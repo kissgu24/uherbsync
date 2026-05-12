@@ -104,19 +104,14 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
-        release {
-            storeFile file(UHERBSYNC_UPLOAD_STORE_FILE)
-            storePassword UHERBSYNC_UPLOAD_STORE_PASSWORD
-            keyAlias UHERBSYNC_UPLOAD_KEY_ALIAS
-            keyPassword UHERBSYNC_UPLOAD_KEY_PASSWORD
-        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.release
+            // EAS Build re-signs with the production keystore from remote credentials.
+            signingConfig signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
