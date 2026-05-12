@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.uherbsync.app'
+    namespace 'com.kissgu24.uherbsync'
     defaultConfig {
-        applicationId 'com.uherbsync.app'
+        applicationId 'com.kissgu24.uherbsync'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 5
