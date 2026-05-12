@@ -39,9 +39,9 @@ yarn-error.*
 
 # generated native folders
 /ios
-/android
 
 # sensitive credentials
 password/
 *.keystore
 android/gradle.properties
+credentials.json
